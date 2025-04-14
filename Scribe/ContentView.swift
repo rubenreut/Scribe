@@ -6,81 +6,65 @@
 //
 
 import SwiftUI
-import CoreData
+import SwiftData
 
 struct ContentView: View {
-    @Environment(\.managedObjectContext) private var viewContext
-
-    @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(keyPath: \Item.timestamp, ascending: true)],
-        animation: .default)
-    private var items: FetchedResults<Item>
-
+    @Environment(\.modelContext) private var modelContext
+    @State private var selectedNote: ScribeNote?
+    @State private var searchText = ""
+    
+    // Use a standard Query to fetch all notes sorted by lastModified
+    @Query(sort: \ScribeNote.lastModified, order: .reverse) private var allNotes: [ScribeNote]
+    
+    // Filter notes in-memory instead of using a predicate
+    var filteredNotes: [ScribeNote] {
+        if searchText.isEmpty {
+            return allNotes
+        } else {
+            return allNotes.filter { note in
+                note.title.localizedStandardContains(searchText) ||
+                note.content.localizedStandardContains(searchText)
+            }
+        }
+    }
+    
     var body: some View {
-        NavigationView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp!, formatter: itemFormatter)")
-                    } label: {
-                        Text(item.timestamp!, formatter: itemFormatter)
+        NavigationSplitView {
+            VStack {
+                NoteListView(notes: filteredNotes, selectedNote: $selectedNote)
+                    .searchable(text: $searchText, prompt: "Search notes...")
+                    .navigationTitle("Notes")
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button(action: createNewNote) {
+                                Label("New Note", systemImage: "square.and.pencil")
+                            }
+                        }
                     }
-                }
-                .onDelete(perform: deleteItems)
             }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
-            }
-            Text("Select an item")
+        } detail: {
+            NoteEditorView(note: $selectedNote)
+                .environment(\.modelContext, modelContext)
         }
+        .navigationSplitViewStyle(.balanced)
     }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(context: viewContext)
-            newItem.timestamp = Date()
-
-            do {
-                try viewContext.save()
-            } catch {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-                let nsError = error as NSError
-                fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
-            }
-        }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            offsets.map { items[$0] }.forEach(viewContext.delete)
-
-            do {
-                try viewContext.save()
-            } catch {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-                let nsError = error as NSError
-                fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
-            }
-        }
+    
+    private func createNewNote() {
+        let newNote = ScribeNote()
+        modelContext.insert(newNote)
+        selectedNote = newNote
     }
 }
 
-private let itemFormatter: DateFormatter = {
-    let formatter = DateFormatter()
-    formatter.dateStyle = .short
-    formatter.timeStyle = .medium
-    return formatter
-}()
-
 #Preview {
-    ContentView().environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
+    let container = try! ModelContainer(for: ScribeNote.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    
+    // Add sample data
+    let note1 = ScribeNote(title: "Meeting Notes", content: "Discuss project timeline and milestones", createdAt: Date().addingTimeInterval(-86400), lastModified: Date().addingTimeInterval(-3600))
+    let note2 = ScribeNote(title: "Shopping List", content: "Milk\nEggs\nBread", createdAt: Date().addingTimeInterval(-172800), lastModified: Date().addingTimeInterval(-7200))
+    container.mainContext.insert(note1)
+    container.mainContext.insert(note2)
+    
+    return ContentView()
+        .modelContainer(container)
 }

@@ -1,0 +1,290 @@
+
+
+######## Scribe/ContentView.swift ########
+
+//
+//  ContentView.swift
+//  Scribe
+//
+//  Created by Ruben Reut on 14/04/2025.
+//
+
+import SwiftUI
+import SwiftData
+
+struct ContentView: View {
+    @Environment(\.modelContext) private var modelContext
+    @State private var selectedNote: ScribeNote?
+    @State private var searchText = ""
+    
+    // Use a standard Query to fetch all notes sorted by lastModified
+    @Query(sort: \ScribeNote.lastModified, order: .reverse) private var allNotes: [ScribeNote]
+    
+    // Filter notes in-memory instead of using a predicate
+    var filteredNotes: [ScribeNote] {
+        if searchText.isEmpty {
+            return allNotes
+        } else {
+            return allNotes.filter { note in
+                note.title.localizedStandardContains(searchText) ||
+                note.content.localizedStandardContains(searchText)
+            }
+        }
+    }
+    
+    var body: some View {
+        NavigationSplitView {
+            VStack {
+                NoteListView(notes: filteredNotes, selectedNote: $selectedNote)
+                    .searchable(text: $searchText, prompt: "Search notes...")
+                    .navigationTitle("Notes")
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button(action: createNewNote) {
+                                Label("New Note", systemImage: "square.and.pencil")
+                            }
+                        }
+                    }
+            }
+        } detail: {
+            NoteEditorView(note: $selectedNote)
+                .environment(\.modelContext, modelContext)
+        }
+        .navigationSplitViewStyle(.balanced)
+    }
+    
+    private func createNewNote() {
+        let newNote = ScribeNote()
+        modelContext.insert(newNote)
+        selectedNote = newNote
+    }
+}
+
+#Preview {
+    let container = try! ModelContainer(for: ScribeNote.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    
+    // Add sample data
+    let note1 = ScribeNote(title: "Meeting Notes", content: "Discuss project timeline and milestones", createdAt: Date().addingTimeInterval(-86400), lastModified: Date().addingTimeInterval(-3600))
+    let note2 = ScribeNote(title: "Shopping List", content: "Milk\nEggs\nBread", createdAt: Date().addingTimeInterval(-172800), lastModified: Date().addingTimeInterval(-7200))
+    container.mainContext.insert(note1)
+    container.mainContext.insert(note2)
+    
+    return ContentView()
+        .modelContainer(container)
+}
+
+
+######## Scribe/Model/Note.swift ########
+
+import Foundation
+import SwiftData
+import SwiftUI
+
+@Model
+final class ScribeNote {
+    var title: String
+    var content: String
+    var createdAt: Date
+    var lastModified: Date
+    
+    init(title: String = "New Note", content: String = "", createdAt: Date = Date(), lastModified: Date = Date()) {
+        self.title = title
+        self.content = content
+        self.createdAt = createdAt
+        self.lastModified = lastModified
+    }
+}
+
+######## Scribe/ScribeApp.swift ########
+
+//
+//  ScribeApp.swift
+//  Scribe
+//
+//  Created by Ruben Reut on 14/04/2025.
+//
+
+import SwiftUI
+import SwiftData
+
+@main
+struct ScribeApp: App {
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
+        .modelContainer(for: ScribeNote.self)
+    }
+}
+
+
+######## Scribe/View/NoteEditorView.swift ########
+
+import SwiftUI
+import SwiftData
+
+struct NoteEditorView: View {
+    @Binding var note: ScribeNote?
+    @Environment(\.modelContext) private var modelContext
+    @State private var lastSaveTime = Date()
+    
+    // Timer for autosave
+    @State private var timer: Timer?
+    
+    var body: some View {
+        Group {
+            if let note = note {
+                VStack(spacing: 0) {
+                    TextField("Title", text: Binding(
+                        get: { note.title },
+                        set: { newValue in
+                            note.title = newValue
+                            note.lastModified = Date()
+                            scheduleAutosave()
+                        }
+                    ))
+                    .font(.largeTitle)
+                    .padding([.horizontal, .top])
+                    .textFieldStyle(.plain)
+                    
+                    Divider()
+                        .padding(.horizontal)
+                    
+                    TextEditor(text: Binding(
+                        get: { note.content },
+                        set: { newValue in
+                            note.content = newValue
+                            note.lastModified = Date()
+                            scheduleAutosave()
+                        }
+                    ))
+                    .font(.body)
+                    .scrollContentBackground(.hidden)
+                    .background(Color(.systemBackground))
+                    .padding()
+                    
+                    HStack {
+                        Spacer()
+                        Text("Last edited: \(note.lastModified, style: .relative)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal)
+                    }
+                    .padding(.bottom, 4)
+                }
+                .toolbar {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        
+                        Button("Done") {
+                            hideKeyboard()
+                        }
+                    }
+                }
+            } else {
+                ContentUnavailableView(
+                    label: {
+                        Label("No Note Selected", systemImage: "square.and.pencil")
+                    },
+                    description: {
+                        Text("Select a note from the list or create a new one.")
+                    }
+                )
+            }
+        }
+        .onDisappear {
+            timer?.invalidate()
+            saveChanges()
+        }
+    }
+    
+    private func scheduleAutosave() {
+        // Cancel existing timer
+        timer?.invalidate()
+        
+        // Create a new timer that will save after 0.5 seconds of inactivity
+        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { _ in
+            saveChanges()
+        }
+    }
+    
+    private func saveChanges() {
+        try? modelContext.save()
+        lastSaveTime = Date()
+    }
+    
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+
+#Preview {
+    let container = try! ModelContainer(for: ScribeNote.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    
+    // Add sample data
+    let note = ScribeNote(title: "Meeting Notes", content: "Discuss project timeline and milestones")
+    container.mainContext.insert(note)
+    
+    return NoteEditorView(note: .constant(note))
+        .modelContainer(container)
+}
+
+
+######## Scribe/View/NoteListView.swift ########
+
+import SwiftUI
+import SwiftData
+
+struct NoteListView: View {
+    var notes: [ScribeNote]
+    @Binding var selectedNote: ScribeNote?
+    @Environment(\.modelContext) private var modelContext
+    
+    var body: some View {
+        List(selection: $selectedNote) {
+            ForEach(notes) { note in
+                NoteRowView(note: note)
+                    .tag(note)
+            }
+            .onDelete(perform: deleteNotes)
+        }
+        .listStyle(.sidebar)
+        .navigationTitle("Notes")
+        .scrollContentBackground(.visible)
+    }
+    
+    private func deleteNotes(_ indexSet: IndexSet) {
+        for index in indexSet {
+            let noteToDelete = notes[index]
+            modelContext.delete(noteToDelete)
+            
+            // If the deleted note was selected, deselect it
+            if selectedNote == noteToDelete {
+                selectedNote = nil
+            }
+        }
+    }
+}
+
+struct NoteRowView: View {
+    let note: ScribeNote
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(note.title)
+                .font(.headline)
+                .lineLimit(1)
+            
+            Text(note.lastModified, style: .relative)
+                .font(.caption)
+                .foregroundColor(.secondary)
+            
+            Text(note.content)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .lineLimit(2)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
