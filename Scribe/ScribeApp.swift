@@ -7,14 +7,44 @@
 
 import SwiftUI
 import SwiftData
+import OSLog
+import Foundation
 
+/// Main application entry point
 @main
 struct ScribeApp: App {
+    private let logger = Logger(subsystem: "com.rubenreut.Scribe", category: "Application")
+    
+    init() {
+        logger.info("Application starting up")
+        configureLogger()
+    }
+    
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .onAppear {
+                    logger.debug("ContentView appeared")
+                }
         }
         .modelContainer(for: ScribeNote.self)
+        .commands {
+            // Add app-specific commands
+            CommandGroup(after: .newItem) {
+                Button("New Note") {
+                    NotificationCenter.default.post(name: Constants.NotificationNames.createNewNote, object: nil)
+                }
+                .keyboardShortcut("n", modifiers: [.command])
+            }
+        }
+    }
+    
+    /// Configures application-wide logging
+    private func configureLogger() {
+        #if DEBUG
+        // More verbose in debug builds
+        logger.debug("Debug logging enabled")
+        #endif
     }
 }
 

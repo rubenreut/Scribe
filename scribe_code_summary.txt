@@ -11,66 +11,98 @@
 
 import SwiftUI
 import SwiftData
+import Foundation
+import UIKit
 
+/// Main content view showing split navigation between note list and editor
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
-    @State private var selectedNote: ScribeNote?
-    @State private var searchText = ""
+    @State private var viewModel: NoteViewModel
+    @AppStorage("useRichText") private var useRichText: Bool = true
     
-    // Use a standard Query to fetch all notes sorted by lastModified
-    @Query(sort: \ScribeNote.lastModified, order: .reverse) private var allNotes: [ScribeNote]
-    
-    // Filter notes in-memory instead of using a predicate
-    var filteredNotes: [ScribeNote] {
-        if searchText.isEmpty {
-            return allNotes
-        } else {
-            return allNotes.filter { note in
-                note.title.localizedStandardContains(searchText) ||
-                note.content.localizedStandardContains(searchText)
-            }
+    init() {
+        // This will be properly initialized when the @Environment is available
+        do {
+            let container = try ModelContainer(for: ScribeNote.self)
+            _viewModel = State(initialValue: NoteViewModel(modelContext: ModelContext(container)))
+        } catch {
+            fatalError("Failed to create model container: \(error.localizedDescription)")
         }
     }
     
     var body: some View {
         NavigationSplitView {
             VStack {
-                NoteListView(notes: filteredNotes, selectedNote: $selectedNote)
-                    .searchable(text: $searchText, prompt: "Search notes...")
-                    .navigationTitle("Notes")
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button(action: createNewNote) {
-                                Label("New Note", systemImage: "square.and.pencil")
-                            }
+                NoteListView(
+                    notes: viewModel.filteredNotes,
+                    selectedNote: $viewModel.selectedNote,
+                    onDelete: viewModel.deleteNotes,
+                    viewModel: viewModel
+                )
+                .searchable(text: $viewModel.searchText, prompt: "Search notes...")
+                .navigationTitle("Notes")
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button(action: viewModel.createNewNote) {
+                            Label("New Note", systemImage: "square.and.pencil")
+                                .accessibilityLabel("Create a new note")
                         }
                     }
+                    
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button {
+                            useRichText.toggle()
+                        } label: {
+                            Label(
+                                useRichText ? "Plain Text" : "Rich Text", 
+                                systemImage: useRichText ? "doc.plaintext" : "textformat"
+                            )
+                        }
+                        .accessibilityLabel("Toggle Rich Text Editing")
+                    }
+                }
             }
         } detail: {
-            NoteEditorView(note: $selectedNote)
-                .environment(\.modelContext, modelContext)
+            // Conditionally show either rich text or plain text editor
+            ZStack {
+                if useRichText {
+                    RichTextNoteEditorView(note: $viewModel.selectedNote, viewModel: viewModel)
+                        .transition(.opacity)
+                } else {
+                    NoteEditorView(note: $viewModel.selectedNote, viewModel: viewModel)
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.3), value: useRichText)
         }
         .navigationSplitViewStyle(.balanced)
-    }
-    
-    private func createNewNote() {
-        let newNote = ScribeNote()
-        modelContext.insert(newNote)
-        selectedNote = newNote
+        .onAppear {
+            // Replace the temporary context with the real one
+            viewModel = NoteViewModel(modelContext: modelContext)
+            
+            // Refresh notes on appear to ensure we have the latest data
+            viewModel.refreshNotes()
+            
+            // Set up a timer to periodically refresh notes
+            Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+                viewModel.refreshNotes()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Constants.NotificationNames.createNewNote)) { _ in
+            viewModel.createNewNote()
+        }
     }
 }
 
 #Preview {
-    let container = try! ModelContainer(for: ScribeNote.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    @MainActor func createPreview() -> some View {
+        let container = try! ModelContainer(for: ScribeNote.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        
+        return ContentView()
+            .modelContainer(container)
+    }
     
-    // Add sample data
-    let note1 = ScribeNote(title: "Meeting Notes", content: "Discuss project timeline and milestones", createdAt: Date().addingTimeInterval(-86400), lastModified: Date().addingTimeInterval(-3600))
-    let note2 = ScribeNote(title: "Shopping List", content: "Milk\nEggs\nBread", createdAt: Date().addingTimeInterval(-172800), lastModified: Date().addingTimeInterval(-7200))
-    container.mainContext.insert(note1)
-    container.mainContext.insert(note2)
-    
-    return ContentView()
-        .modelContainer(container)
+    return createPreview()
 }
 
 
@@ -80,18 +112,31 @@ import Foundation
 import SwiftData
 import SwiftUI
 
+/// Represents a note in the Scribe application
 @Model
 final class ScribeNote {
     var title: String
-    var content: String
+    var content: Data
     var createdAt: Date
     var lastModified: Date
     
-    init(title: String = "New Note", content: String = "", createdAt: Date = Date(), lastModified: Date = Date()) {
+    /// Creates a new note with optional parameters
+    /// - Parameters:
+    ///   - title: The title of the note
+    ///   - content: The content as binary data (for attributed string)
+    ///   - createdAt: The creation date (defaults to now)
+    ///   - lastModified: The last modification date (defaults to now)
+    init(title: String = "New Note", content: Data = Data(), createdAt: Date = Date(), lastModified: Date = Date()) {
         self.title = title
         self.content = content
         self.createdAt = createdAt
         self.lastModified = lastModified
+    }
+}
+
+extension ScribeNote: Equatable {
+    static func == (lhs: ScribeNote, rhs: ScribeNote) -> Bool {
+        lhs.persistentModelID == rhs.persistentModelID
     }
 }
 
@@ -106,30 +151,81 @@ final class ScribeNote {
 
 import SwiftUI
 import SwiftData
+import OSLog
+import Foundation
 
+/// Main application entry point
 @main
 struct ScribeApp: App {
+    private let logger = Logger(subsystem: "com.rubenreut.Scribe", category: "Application")
+    
+    init() {
+        logger.info("Application starting up")
+        configureLogger()
+    }
+    
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .onAppear {
+                    logger.debug("ContentView appeared")
+                }
         }
         .modelContainer(for: ScribeNote.self)
+        .commands {
+            // Add app-specific commands
+            CommandGroup(after: .newItem) {
+                Button("New Note") {
+                    NotificationCenter.default.post(name: Constants.NotificationNames.createNewNote, object: nil)
+                }
+                .keyboardShortcut("n", modifiers: [.command])
+            }
+        }
+    }
+    
+    /// Configures application-wide logging
+    private func configureLogger() {
+        #if DEBUG
+        // More verbose in debug builds
+        logger.debug("Debug logging enabled")
+        #endif
     }
 }
 
+
+
+######## Scribe/Utilities/Constants.swift ########
+
+import Foundation
+
+/// Application-wide constants
+enum Constants {
+    /// Notification names used throughout the app
+    enum NotificationNames {
+        /// Notification posted when a new note should be created
+        static let createNewNote = Notification.Name("CreateNewNote")
+    }
+    
+    /// Time constants
+    enum Time {
+        /// Autosave delay in milliseconds
+        static let autosaveDelay: UInt64 = 500
+    }
+}
 
 ######## Scribe/View/NoteEditorView.swift ########
 
 import SwiftUI
 import SwiftData
+import OSLog
 
+/// View for editing a single note
 struct NoteEditorView: View {
     @Binding var note: ScribeNote?
-    @Environment(\.modelContext) private var modelContext
-    @State private var lastSaveTime = Date()
+    let viewModel: NoteViewModel
+    private let logger = Logger(subsystem: "com.rubenreut.Scribe", category: "NoteEditorView")
     
-    // Timer for autosave
-    @State private var timer: Timer?
+    @Environment(\.undoManager) private var undoManager
     
     var body: some View {
         Group {
@@ -138,30 +234,33 @@ struct NoteEditorView: View {
                     TextField("Title", text: Binding(
                         get: { note.title },
                         set: { newValue in
-                            note.title = newValue
-                            note.lastModified = Date()
-                            scheduleAutosave()
+                            viewModel.updateNoteTitle(note, newTitle: newValue)
                         }
                     ))
                     .font(.largeTitle)
                     .padding([.horizontal, .top])
                     .textFieldStyle(.plain)
+                    .accessibilityIdentifier("note-title-field")
                     
                     Divider()
                         .padding(.horizontal)
                     
                     TextEditor(text: Binding(
-                        get: { note.content },
+                        get: { 
+                            // Get plain text from the attributed string
+                            return viewModel.attributedContent(for: note).string
+                        },
                         set: { newValue in
-                            note.content = newValue
-                            note.lastModified = Date()
-                            scheduleAutosave()
+                            // Create a simple attributed string from plain text
+                            let attributedString = NSAttributedString(string: newValue)
+                            viewModel.updateNoteContent(note, newContent: attributedString)
                         }
                     ))
                     .font(.body)
                     .scrollContentBackground(.hidden)
                     .background(Color(.systemBackground))
                     .padding()
+                    .accessibilityIdentifier("note-content-field")
                     
                     HStack {
                         Spacer()
@@ -169,6 +268,7 @@ struct NoteEditorView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .padding(.horizontal)
+                            .accessibilityLabel("Last edited \(note.lastModified.formatted())")
                     }
                     .padding(.bottom, 4)
                 }
@@ -178,6 +278,25 @@ struct NoteEditorView: View {
                         
                         Button("Done") {
                             hideKeyboard()
+                        }
+                        .accessibilityIdentifier("keyboard-done-button")
+                    }
+                    
+                    ToolbarItemGroup(placement: .primaryAction) {
+                        if let undoManager = undoManager {
+                            Button {
+                                undoManager.undo()
+                            } label: {
+                                Label("Undo", systemImage: "arrow.uturn.backward")
+                            }
+                            .disabled(!undoManager.canUndo)
+                            
+                            Button {
+                                undoManager.redo()
+                            } label: {
+                                Label("Redo", systemImage: "arrow.uturn.forward")
+                            }
+                            .disabled(!undoManager.canRedo)
                         }
                     }
                 }
@@ -192,25 +311,11 @@ struct NoteEditorView: View {
                 )
             }
         }
-        .onDisappear {
-            timer?.invalidate()
-            saveChanges()
+        .task(id: note?.persistentModelID) {
+            if note != nil {
+                logger.debug("Started editing note")
+            }
         }
-    }
-    
-    private func scheduleAutosave() {
-        // Cancel existing timer
-        timer?.invalidate()
-        
-        // Create a new timer that will save after 0.5 seconds of inactivity
-        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { _ in
-            saveChanges()
-        }
-    }
-    
-    private func saveChanges() {
-        try? modelContext.save()
-        lastSaveTime = Date()
     }
     
     private func hideKeyboard() {
@@ -219,14 +324,26 @@ struct NoteEditorView: View {
 }
 
 #Preview {
-    let container = try! ModelContainer(for: ScribeNote.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    @MainActor func createPreview() -> some View {
+        let container = try! ModelContainer(for: ScribeNote.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let modelContext = container.mainContext
+        let viewModel = NoteViewModel(modelContext: modelContext)
+        
+        // Create an attributed string
+        let attributedString = NSAttributedString(string: "This is sample content")
+        
+        // Create sample note with archived attributed string
+        let sampleNote = ScribeNote(title: "Sample Note")
+        if let data = try? NSKeyedArchiver.archivedData(withRootObject: attributedString, requiringSecureCoding: false) {
+            sampleNote.content = data
+        }
+        modelContext.insert(sampleNote)
+        
+        return NoteEditorView(note: .constant(sampleNote), viewModel: viewModel)
+            .modelContainer(container)
+    }
     
-    // Add sample data
-    let note = ScribeNote(title: "Meeting Notes", content: "Discuss project timeline and milestones")
-    container.mainContext.insert(note)
-    
-    return NoteEditorView(note: .constant(note))
-        .modelContainer(container)
+    return createPreview()
 }
 
 
@@ -235,25 +352,654 @@ struct NoteEditorView: View {
 import SwiftUI
 import SwiftData
 
+/// List view showing all notes
 struct NoteListView: View {
     var notes: [ScribeNote]
     @Binding var selectedNote: ScribeNote?
-    @Environment(\.modelContext) private var modelContext
+    var onDelete: (IndexSet) -> Void
+    let viewModel: NoteViewModel
     
     var body: some View {
         List(selection: $selectedNote) {
             ForEach(notes) { note in
-                NoteRowView(note: note)
+                NoteRowView(note: note, viewModel: viewModel)
                     .tag(note)
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            if let index = notes.firstIndex(where: { $0 == note }) {
+                                onDelete(IndexSet(integer: index))
+                            }
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
             }
-            .onDelete(perform: deleteNotes)
+            .onDelete(perform: onDelete)
         }
         .listStyle(.sidebar)
         .navigationTitle("Notes")
         .scrollContentBackground(.visible)
+        .accessibilityLabel("Notes list")
+    }
+}
+
+/// Individual row in the notes list
+struct NoteRowView: View {
+    let note: ScribeNote
+    let viewModel: NoteViewModel
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(note.title)
+                .font(.headline)
+                .lineLimit(1)
+                .accessibilityAddTraits(.isHeader)
+            
+            Text(note.lastModified, style: .relative)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .accessibilityLabel("Last edited \(note.lastModified.formatted())")
+            
+            Text(viewModel.attributedContent(for: note).string)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .lineLimit(2)
+                .accessibilityLabel("Note preview: \(viewModel.attributedContent(for: note).string)")
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+#Preview {
+    @MainActor func createPreview() -> some View {
+        let container = try! ModelContainer(for: ScribeNote.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let modelContext = container.mainContext
+        let viewModel = NoteViewModel(modelContext: modelContext)
+        
+        // Create an attributed string
+        let attributedString = NSAttributedString(string: "This is sample content")
+        
+        // Create sample note with archived attributed string
+        let sampleNote = ScribeNote(title: "Sample Note")
+        if let data = try? NSKeyedArchiver.archivedData(withRootObject: attributedString, requiringSecureCoding: false) {
+            sampleNote.content = data
+        }
+        modelContext.insert(sampleNote)
+        
+        return NoteListView(
+            notes: [sampleNote],
+            selectedNote: .constant(sampleNote),
+            onDelete: { _ in },
+            viewModel: viewModel
+        )
+        .modelContainer(container)
     }
     
-    private func deleteNotes(_ indexSet: IndexSet) {
+    return createPreview()
+}
+
+
+
+######## Scribe/View/RichTextEditor.swift ########
+
+import SwiftUI
+import UIKit
+import Combine
+
+/// A SwiftUI wrapper around UITextView for rich text editing
+struct RichTextEditor: UIViewRepresentable {
+    @Binding var attributedText: NSAttributedString
+    var onTextChange: (NSAttributedString) -> Void
+    
+    // Configuration options
+    var backgroundColor: UIColor = .systemBackground
+    var tintColor: UIColor = .label
+    
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.delegate = context.coordinator
+        textView.attributedText = attributedText
+        textView.backgroundColor = backgroundColor
+        textView.tintColor = tintColor
+        textView.font = .preferredFont(forTextStyle: .body)
+        textView.isScrollEnabled = true
+        textView.isEditable = true
+        textView.isUserInteractionEnabled = true
+        textView.autocapitalizationType = .sentences
+        textView.autocorrectionType = .default
+        textView.allowsEditingTextAttributes = true
+        textView.dataDetectorTypes = [.link]
+        textView.isSelectable = true
+        context.coordinator.textView = textView
+        
+        // Store reference in the shared holder
+        DispatchQueue.main.async {
+            RichTextViewHolder.shared.textView = textView
+        }
+        
+        return textView
+    }
+    
+    func updateUIView(_ textView: UITextView, context: Context) {
+        if textView.attributedText != attributedText {
+            // Only update if the text has changed to avoid cursor jumping
+            textView.attributedText = attributedText
+        }
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    class Coordinator: NSObject, UITextViewDelegate {
+        var parent: RichTextEditor
+        var textView: UITextView?
+        
+        init(_ parent: RichTextEditor) {
+            self.parent = parent
+        }
+        
+        func textViewDidChange(_ textView: UITextView) {
+            self.textView = textView
+            parent.attributedText = textView.attributedText
+            parent.onTextChange(textView.attributedText)
+        }
+    }
+}
+
+/// A toolbar for rich text editing actions
+struct RichTextToolbar: View {
+    @Binding var attributedText: NSAttributedString
+    let textView: UITextView?  // Reference to the active UITextView
+    
+    // Active formatting state
+    @State private var isBold = false
+    @State private var isItalic = false
+    @State private var isUnderlined = false
+    
+    @State private var showColorPicker = false
+    @State private var textColor: Color = .primary
+    
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                // Bold button
+                Button(action: toggleBold) {
+                    Image(systemName: "bold")
+                        .padding(8)
+                        .background(isBold ? Color.accentColor.opacity(0.2) : Color.clear)
+                        .cornerRadius(8)
+                }
+                .accessibilityLabel("Bold")
+                
+                // Italic button
+                Button(action: toggleItalic) {
+                    Image(systemName: "italic")
+                        .padding(8)
+                        .background(isItalic ? Color.accentColor.opacity(0.2) : Color.clear)
+                        .cornerRadius(8)
+                }
+                .accessibilityLabel("Italic")
+                
+                // Underline button
+                Button(action: toggleUnderline) {
+                    Image(systemName: "underline")
+                        .padding(8)
+                        .background(isUnderlined ? Color.accentColor.opacity(0.2) : Color.clear)
+                        .cornerRadius(8)
+                }
+                .accessibilityLabel("Underline")
+                
+                Divider()
+                    .frame(height: 20)
+                
+                // Color picker
+                Button(action: { showColorPicker.toggle() }) {
+                    Image(systemName: "paintpalette")
+                        .padding(8)
+                        .foregroundColor(textColor)
+                }
+                .accessibilityLabel("Text Color")
+                
+                Divider()
+                    .frame(height: 20)
+                
+                // Heading buttons
+                Button(action: { applyHeading(.title) }) {
+                    Text("H1")
+                        .fontWeight(.bold)
+                        .padding(8)
+                }
+                .accessibilityLabel("Heading 1")
+                
+                Button(action: { applyHeading(.headline) }) {
+                    Text("H2")
+                        .fontWeight(.bold)
+                        .padding(8)
+                }
+                .accessibilityLabel("Heading 2")
+                
+                Button(action: { applyHeading(.body) }) {
+                    Text("Body")
+                        .padding(8)
+                }
+                .accessibilityLabel("Body text")
+                
+                Divider()
+                    .frame(height: 20)
+                
+                // List and bullet points
+                Button(action: applyBulletPoints) {
+                    Image(systemName: "list.bullet")
+                        .padding(8)
+                }
+                .accessibilityLabel("Bullet list")
+                
+                // Clear formatting
+                Button(action: clearFormatting) {
+                    Image(systemName: "eraser")
+                        .padding(8)
+                }
+                .accessibilityLabel("Clear formatting")
+            }
+            .padding(.horizontal)
+        }
+        .frame(height: 56)
+        .background(Color(UIColor.secondarySystemBackground))
+        .sheet(isPresented: $showColorPicker) {
+            ColorPicker("Text Color", selection: $textColor)
+                .padding()
+                .onChange(of: textColor) { _ in
+                    applyTextColor()
+                }
+                .presentationDetents([.height(200)])
+        }
+    }
+    
+    // Apply bold formatting
+    private func toggleBold() {
+        isBold.toggle()
+        
+        guard let textView = textView else { return }
+        let selectedRange = textView.selectedRange
+        
+        if selectedRange.length > 0 {
+            let mutableAttrText = NSMutableAttributedString(attributedString: attributedText)
+            let currentFont = mutableAttrText.attribute(.font, at: selectedRange.location, effectiveRange: nil) as? UIFont ?? UIFont.preferredFont(forTextStyle: .body)
+            
+            let newFont: UIFont
+            if isBold {
+                newFont = UIFont.boldSystemFont(ofSize: currentFont.pointSize)
+            } else {
+                newFont = UIFont.systemFont(ofSize: currentFont.pointSize)
+            }
+            
+            mutableAttrText.addAttribute(.font, value: newFont, range: selectedRange)
+            attributedText = mutableAttrText
+            textView.attributedText = mutableAttrText
+            textView.selectedRange = selectedRange
+        }
+    }
+    
+    // Apply italic formatting
+    private func toggleItalic() {
+        isItalic.toggle()
+        
+        guard let textView = textView else { return }
+        let selectedRange = textView.selectedRange
+        
+        if selectedRange.length > 0 {
+            let mutableAttrText = NSMutableAttributedString(attributedString: attributedText)
+            let currentFont = mutableAttrText.attribute(.font, at: selectedRange.location, effectiveRange: nil) as? UIFont ?? UIFont.preferredFont(forTextStyle: .body)
+            
+            let newFont: UIFont
+            if isItalic {
+                newFont = UIFont.italicSystemFont(ofSize: currentFont.pointSize)
+            } else {
+                newFont = UIFont.systemFont(ofSize: currentFont.pointSize)
+            }
+            
+            mutableAttrText.addAttribute(.font, value: newFont, range: selectedRange)
+            attributedText = mutableAttrText
+            textView.attributedText = mutableAttrText
+            textView.selectedRange = selectedRange
+        }
+    }
+    
+    // Apply underline formatting
+    private func toggleUnderline() {
+        isUnderlined.toggle()
+        
+        guard let textView = textView else { return }
+        let selectedRange = textView.selectedRange
+        
+        if selectedRange.length > 0 {
+            let mutableAttrText = NSMutableAttributedString(attributedString: attributedText)
+            
+            if isUnderlined {
+                mutableAttrText.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: selectedRange)
+            } else {
+                mutableAttrText.removeAttribute(.underlineStyle, range: selectedRange)
+            }
+            
+            attributedText = mutableAttrText
+            textView.attributedText = mutableAttrText
+            textView.selectedRange = selectedRange
+        }
+    }
+    
+    // Apply text color
+    private func applyTextColor() {
+        guard let textView = textView else { return }
+        let selectedRange = textView.selectedRange
+        
+        if selectedRange.length > 0 {
+            let mutableAttrText = NSMutableAttributedString(attributedString: attributedText)
+            let uiColor = UIColor(textColor)
+            
+            mutableAttrText.addAttribute(.foregroundColor, value: uiColor, range: selectedRange)
+            attributedText = mutableAttrText
+            textView.attributedText = mutableAttrText
+            textView.selectedRange = selectedRange
+        }
+    }
+    
+    // Apply heading format
+    private func applyHeading(_ style: Font.TextStyle) {
+        guard let textView = textView else { return }
+        let selectedRange = textView.selectedRange
+        
+        if selectedRange.length > 0 {
+            let mutableAttrText = NSMutableAttributedString(attributedString: attributedText)
+            
+            let fontSize: CGFloat
+            switch style {
+            case .title: fontSize = 24
+            case .headline: fontSize = 18
+            default: fontSize = 16
+            }
+            
+            let newFont = UIFont.systemFont(ofSize: fontSize, weight: style == .body ? .regular : .bold)
+            
+            mutableAttrText.addAttribute(.font, value: newFont, range: selectedRange)
+            attributedText = mutableAttrText
+            textView.attributedText = mutableAttrText
+            textView.selectedRange = selectedRange
+        }
+    }
+    
+    // Apply bullet points
+    private func applyBulletPoints() {
+        guard let textView = textView else { return }
+        let selectedRange = textView.selectedRange
+        
+        if selectedRange.length > 0 {
+            let mutableAttrText = NSMutableAttributedString(attributedString: attributedText)
+            let fullText = mutableAttrText.string
+            let selectedText = fullText.substring(with: Range(selectedRange, in: fullText)!)
+            
+            // Split by new lines and add bullets
+            let lines = selectedText.split(separator: "\n")
+            var bulletedText = ""
+            
+            for line in lines {
+                if !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    bulletedText += "• " + line + "\n"
+                } else {
+                    bulletedText += line + "\n"
+                }
+            }
+            
+            // If there's a trailing newline in selectedText, remove it from bulletedText
+            if selectedText.hasSuffix("\n") && bulletedText.hasSuffix("\n\n") {
+                bulletedText.removeLast()
+            }
+            
+            let bulletedAttrString = NSAttributedString(string: bulletedText)
+            mutableAttrText.replaceCharacters(in: selectedRange, with: bulletedAttrString)
+            
+            attributedText = mutableAttrText
+            textView.attributedText = mutableAttrText
+            textView.selectedRange = NSRange(location: selectedRange.location, length: bulletedText.count)
+        }
+    }
+    
+    // Clear all formatting
+    private func clearFormatting() {
+        guard let textView = textView else { return }
+        let selectedRange = textView.selectedRange
+        
+        if selectedRange.length > 0 {
+            let mutableAttrText = NSMutableAttributedString(attributedString: attributedText)
+            let plainText = mutableAttrText.string.substring(with: Range(selectedRange, in: mutableAttrText.string)!)
+            let plainAttrString = NSAttributedString(string: plainText)
+            
+            mutableAttrText.replaceCharacters(in: selectedRange, with: plainAttrString)
+            
+            attributedText = mutableAttrText
+            textView.attributedText = mutableAttrText
+            textView.selectedRange = NSRange(location: selectedRange.location, length: plainText.count)
+        }
+    }
+}
+
+/// Utility for creating default attributed strings
+struct AttributedStringHelper {
+    /// Creates a new attributed string with default attributes
+    static func createDefaultString(_ text: String = "") -> NSAttributedString {
+        let defaultAttributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.preferredFont(forTextStyle: .body)
+        ]
+        return NSAttributedString(string: text, attributes: defaultAttributes)
+    }
+}
+
+
+######## Scribe/View/RichTextNoteEditorView.swift ########
+
+import SwiftUI
+import UIKit
+import SwiftData
+import OSLog
+
+/// View for editing a note with rich text formatting capabilities
+struct RichTextNoteEditorView: View {
+    @Binding var note: ScribeNote?
+    let viewModel: NoteViewModel
+    @State private var attributedText = NSAttributedString(string: "")
+    @ObservedObject private var textViewHolder = RichTextViewHolder.shared
+    
+    private let logger = Logger(subsystem: "com.rubenreut.Scribe", category: "RichTextNoteEditorView")
+    
+    var body: some View {
+        Group {
+            if let note = note {
+                VStack(spacing: 0) {
+                    // Title field
+                    TextField("Title", text: Binding(
+                        get: { note.title },
+                        set: { newValue in
+                            viewModel.updateNoteTitle(note, newTitle: newValue)
+                        }
+                    ))
+                    .font(.largeTitle)
+                    .padding([.horizontal, .top])
+                    .textFieldStyle(.plain)
+                    .accessibilityIdentifier("note-title-field")
+                    
+                    Divider()
+                        .padding(.horizontal)
+                    
+                    // Rich text editor
+                    RichTextEditor(attributedText: $attributedText, onTextChange: { newText in
+                        // Update the note's content directly with NSAttributedString
+                        viewModel.updateNoteContent(note, newContent: newText)
+                    })
+                    .padding(.horizontal, 8)
+                    
+                    // Formatting toolbar
+                    RichTextToolbar(attributedText: $attributedText, textView: textViewHolder.textView)
+                    
+                    // Last edited timestamp
+                    HStack {
+                        Spacer()
+                        Text("Last edited: \(note.lastModified, style: .relative)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal)
+                            .accessibilityLabel("Last edited \(note.lastModified.formatted())")
+                    }
+                    .padding(.bottom, 4)
+                }
+                .toolbar {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        
+                        Button("Done") {
+                            hideKeyboard()
+                        }
+                        .accessibilityIdentifier("keyboard-done-button")
+                    }
+                }
+                .onAppear {
+                    // Load the attributed string directly from the note
+                    attributedText = viewModel.attributedContent(for: note)
+                    logger.debug("Started editing note with rich text")
+                }
+            } else {
+                ContentUnavailableView {
+                    Label("No Note Selected", systemImage: "square.and.pencil")
+                } description: {
+                    Text("Select a note from the list or create a new one.")
+                }
+            }
+        }
+    }
+    
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+
+// Observable class to hold the text view reference
+class RichTextViewHolder: ObservableObject {
+    static let shared = RichTextViewHolder()
+    @Published var textView: UITextView?
+    
+    private init() {}
+}
+
+#Preview {
+    @MainActor func createPreview() -> some View {
+        let container = try! ModelContainer(for: ScribeNote.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let modelContext = container.mainContext
+        let viewModel = NoteViewModel(modelContext: modelContext)
+        
+        // Create an attributed string
+        let attributedString = NSAttributedString(string: "This is sample content")
+        
+        // Create sample note with archived attributed string
+        let sampleNote = ScribeNote(title: "Rich Text Sample")
+        if let data = try? NSKeyedArchiver.archivedData(withRootObject: attributedString, requiringSecureCoding: false) {
+            sampleNote.content = data
+        }
+        modelContext.insert(sampleNote)
+        
+        return RichTextNoteEditorView(note: .constant(sampleNote), viewModel: viewModel)
+            .modelContainer(container)
+    }
+    
+    return createPreview()
+}
+
+######## Scribe/ViewModel/NoteViewModel.swift ########
+
+import Foundation
+import SwiftData
+import SwiftUI
+import OSLog
+
+/// ViewModel for handling note operations
+@Observable @MainActor class NoteViewModel {
+    private let logger = Logger(subsystem: "com.rubenreut.Scribe", category: "NoteViewModel")
+    private let modelContext: ModelContext
+    private var saveTask: Task<Void, Never>? = nil
+    
+    var selectedNote: ScribeNote?
+    var searchText: String = ""
+    var notes: [ScribeNote] = []
+    
+    init(modelContext: ModelContext) {
+        self.modelContext = modelContext
+        refreshNotes()
+    }
+    
+    /// Creates a new note and selects it
+    func createNewNote() {
+        let newNote = ScribeNote()
+        modelContext.insert(newNote)
+        selectedNote = newNote
+        
+        // Refresh notes to ensure the new note appears in the list
+        refreshNotes()
+        
+        do {
+            try modelContext.save()
+        } catch {
+            logger.error("Failed to save new note: \(error.localizedDescription)")
+        }
+        
+        logger.debug("Created new note")
+    }
+    
+    /// Saves any pending changes to the notes
+    func saveChanges() {
+        // Cancel any existing save task
+        saveTask?.cancel()
+        
+        // Create a new task with a brief delay to batch rapid changes
+        saveTask = Task {
+            do {
+                try await Task.sleep(for: .milliseconds(Constants.Time.autosaveDelay))
+                guard !Task.isCancelled else { return }
+                
+                try modelContext.save()
+                logger.debug("Successfully saved changes")
+            } catch {
+                logger.error("Failed to save note: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    /// Updates a note's title and marks it as modified
+    func updateNoteTitle(_ note: ScribeNote, newTitle: String) {
+        note.title = newTitle
+        note.lastModified = Date()
+        saveChanges()
+    }
+    
+    /// Updates a note's content with NSAttributedString and marks it as modified
+    func updateNoteContent(_ note: ScribeNote, newContent: NSAttributedString) {
+        do {
+            note.content = try NSKeyedArchiver.archivedData(withRootObject: newContent, requiringSecureCoding: false)
+            note.lastModified = Date()
+            saveChanges()
+        } catch {
+            logger.error("Archiving error: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Retrieves the attributed content for a note
+    func attributedContent(for note: ScribeNote) -> NSAttributedString {
+        guard !note.content.isEmpty,
+              let content = try? NSKeyedUnarchiver.unarchiveTopLevelObjectWithData(note.content) as? NSAttributedString else {
+            return NSAttributedString(string: "")
+        }
+        return content
+    }
+    
+    /// Deletes the specified notes
+    func deleteNotes(at indexSet: IndexSet) {
         for index in indexSet {
             let noteToDelete = notes[index]
             modelContext.delete(noteToDelete)
@@ -263,28 +1009,41 @@ struct NoteListView: View {
                 selectedNote = nil
             }
         }
-    }
-}
-
-struct NoteRowView: View {
-    let note: ScribeNote
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(note.title)
-                .font(.headline)
-                .lineLimit(1)
-            
-            Text(note.lastModified, style: .relative)
-                .font(.caption)
-                .foregroundColor(.secondary)
-            
-            Text(note.content)
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .lineLimit(2)
+        
+        // Save changes after deletion
+        do {
+            try modelContext.save()
+        } catch {
+            logger.error("Failed to save after deletion: \(error.localizedDescription)")
         }
-        .padding(.vertical, 4)
+        
+        // Refresh notes to update the UI
+        refreshNotes()
+        
+        logger.debug("Deleted \(indexSet.count) notes")
+    }
+    
+    /// Refreshes the notes array from the model context
+    func refreshNotes() {
+        do {
+            let descriptor = FetchDescriptor<ScribeNote>(sortBy: [SortDescriptor(\.lastModified, order: .reverse)])
+            notes = try modelContext.fetch(descriptor)
+        } catch {
+            logger.error("Failed to fetch notes: \(error.localizedDescription)")
+            notes = []
+        }
+    }
+    
+    /// Returns filtered notes based on search text
+    var filteredNotes: [ScribeNote] {
+        if searchText.isEmpty {
+            return notes
+        } else {
+            return notes.filter { note in
+                let content = attributedContent(for: note).string
+                return note.title.localizedStandardContains(searchText) ||
+                      content.localizedStandardContains(searchText)
+            }
+        }
     }
 }
-

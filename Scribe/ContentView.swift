@@ -7,64 +7,96 @@
 
 import SwiftUI
 import SwiftData
+import Foundation
+import UIKit
 
+/// Main content view showing split navigation between note list and editor
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
-    @State private var selectedNote: ScribeNote?
-    @State private var searchText = ""
+    @State private var viewModel: NoteViewModel
+    @AppStorage("useRichText") private var useRichText: Bool = true
     
-    // Use a standard Query to fetch all notes sorted by lastModified
-    @Query(sort: \ScribeNote.lastModified, order: .reverse) private var allNotes: [ScribeNote]
-    
-    // Filter notes in-memory instead of using a predicate
-    var filteredNotes: [ScribeNote] {
-        if searchText.isEmpty {
-            return allNotes
-        } else {
-            return allNotes.filter { note in
-                note.title.localizedStandardContains(searchText) ||
-                note.content.localizedStandardContains(searchText)
-            }
+    init() {
+        // This will be properly initialized when the @Environment is available
+        do {
+            let container = try ModelContainer(for: ScribeNote.self)
+            _viewModel = State(initialValue: NoteViewModel(modelContext: ModelContext(container)))
+        } catch {
+            fatalError("Failed to create model container: \(error.localizedDescription)")
         }
     }
     
     var body: some View {
         NavigationSplitView {
             VStack {
-                NoteListView(notes: filteredNotes, selectedNote: $selectedNote)
-                    .searchable(text: $searchText, prompt: "Search notes...")
-                    .navigationTitle("Notes")
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button(action: createNewNote) {
-                                Label("New Note", systemImage: "square.and.pencil")
-                            }
+                NoteListView(
+                    notes: viewModel.filteredNotes,
+                    selectedNote: $viewModel.selectedNote,
+                    onDelete: viewModel.deleteNotes,
+                    viewModel: viewModel
+                )
+                .searchable(text: $viewModel.searchText, prompt: "Search notes...")
+                .navigationTitle("Notes")
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button(action: viewModel.createNewNote) {
+                            Label("New Note", systemImage: "square.and.pencil")
+                                .accessibilityLabel("Create a new note")
                         }
                     }
+                    
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button {
+                            useRichText.toggle()
+                        } label: {
+                            Label(
+                                useRichText ? "Plain Text" : "Rich Text", 
+                                systemImage: useRichText ? "doc.plaintext" : "textformat"
+                            )
+                        }
+                        .accessibilityLabel("Toggle Rich Text Editing")
+                    }
+                }
             }
         } detail: {
-            NoteEditorView(note: $selectedNote)
-                .environment(\.modelContext, modelContext)
+            // Conditionally show either rich text or plain text editor
+            ZStack {
+                if useRichText {
+                    RichTextNoteEditorView(note: $viewModel.selectedNote, viewModel: viewModel)
+                        .transition(.opacity)
+                } else {
+                    NoteEditorView(note: $viewModel.selectedNote, viewModel: viewModel)
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.3), value: useRichText)
         }
         .navigationSplitViewStyle(.balanced)
-    }
-    
-    private func createNewNote() {
-        let newNote = ScribeNote()
-        modelContext.insert(newNote)
-        selectedNote = newNote
+        .onAppear {
+            // Replace the temporary context with the real one
+            viewModel = NoteViewModel(modelContext: modelContext)
+            
+            // Refresh notes on appear to ensure we have the latest data
+            viewModel.refreshNotes()
+            
+            // Set up a timer to periodically refresh notes
+            Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+                viewModel.refreshNotes()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Constants.NotificationNames.createNewNote)) { _ in
+            viewModel.createNewNote()
+        }
     }
 }
 
 #Preview {
-    let container = try! ModelContainer(for: ScribeNote.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    @MainActor func createPreview() -> some View {
+        let container = try! ModelContainer(for: ScribeNote.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        
+        return ContentView()
+            .modelContainer(container)
+    }
     
-    // Add sample data
-    let note1 = ScribeNote(title: "Meeting Notes", content: "Discuss project timeline and milestones", createdAt: Date().addingTimeInterval(-86400), lastModified: Date().addingTimeInterval(-3600))
-    let note2 = ScribeNote(title: "Shopping List", content: "Milk\nEggs\nBread", createdAt: Date().addingTimeInterval(-172800), lastModified: Date().addingTimeInterval(-7200))
-    container.mainContext.insert(note1)
-    container.mainContext.insert(note2)
-    
-    return ContentView()
-        .modelContainer(container)
+    return createPreview()
 }

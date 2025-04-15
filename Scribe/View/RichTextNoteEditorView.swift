@@ -1,19 +1,22 @@
 import SwiftUI
+import UIKit
 import SwiftData
 import OSLog
 
-/// View for editing a single note
-struct NoteEditorView: View {
+/// View for editing a note with rich text formatting capabilities
+struct RichTextNoteEditorView: View {
     @Binding var note: ScribeNote?
     let viewModel: NoteViewModel
-    private let logger = Logger(subsystem: "com.rubenreut.Scribe", category: "NoteEditorView")
+    @State private var attributedText = NSAttributedString(string: "")
+    @ObservedObject private var textViewHolder = RichTextViewHolder.shared
     
-    @Environment(\.undoManager) private var undoManager
+    private let logger = Logger(subsystem: "com.rubenreut.Scribe", category: "RichTextNoteEditorView")
     
     var body: some View {
         Group {
             if let note = note {
                 VStack(spacing: 0) {
+                    // Title field
                     TextField("Title", text: Binding(
                         get: { note.title },
                         set: { newValue in
@@ -28,23 +31,17 @@ struct NoteEditorView: View {
                     Divider()
                         .padding(.horizontal)
                     
-                    TextEditor(text: Binding(
-                        get: { 
-                            // Get plain text from the attributed string
-                            return viewModel.attributedContent(for: note).string
-                        },
-                        set: { newValue in
-                            // Create a simple attributed string from plain text
-                            let attributedString = NSAttributedString(string: newValue)
-                            viewModel.updateNoteContent(note, newContent: attributedString)
-                        }
-                    ))
-                    .font(.body)
-                    .scrollContentBackground(.hidden)
-                    .background(Color(.systemBackground))
-                    .padding()
-                    .accessibilityIdentifier("note-content-field")
+                    // Rich text editor
+                    RichTextEditor(attributedText: $attributedText, onTextChange: { newText in
+                        // Update the note's content directly with NSAttributedString
+                        viewModel.updateNoteContent(note, newContent: newText)
+                    })
+                    .padding(.horizontal, 8)
                     
+                    // Formatting toolbar
+                    RichTextToolbar(attributedText: $attributedText, textView: textViewHolder.textView)
+                    
+                    // Last edited timestamp
                     HStack {
                         Spacer()
                         Text("Last edited: \(note.lastModified, style: .relative)")
@@ -64,39 +61,18 @@ struct NoteEditorView: View {
                         }
                         .accessibilityIdentifier("keyboard-done-button")
                     }
-                    
-                    ToolbarItemGroup(placement: .primaryAction) {
-                        if let undoManager = undoManager {
-                            Button {
-                                undoManager.undo()
-                            } label: {
-                                Label("Undo", systemImage: "arrow.uturn.backward")
-                            }
-                            .disabled(!undoManager.canUndo)
-                            
-                            Button {
-                                undoManager.redo()
-                            } label: {
-                                Label("Redo", systemImage: "arrow.uturn.forward")
-                            }
-                            .disabled(!undoManager.canRedo)
-                        }
-                    }
+                }
+                .onAppear {
+                    // Load the attributed string directly from the note
+                    attributedText = viewModel.attributedContent(for: note)
+                    logger.debug("Started editing note with rich text")
                 }
             } else {
-                ContentUnavailableView(
-                    label: {
-                        Label("No Note Selected", systemImage: "square.and.pencil")
-                    },
-                    description: {
-                        Text("Select a note from the list or create a new one.")
-                    }
-                )
-            }
-        }
-        .task(id: note?.persistentModelID) {
-            if note != nil {
-                logger.debug("Started editing note")
+                ContentUnavailableView {
+                    Label("No Note Selected", systemImage: "square.and.pencil")
+                } description: {
+                    Text("Select a note from the list or create a new one.")
+                }
             }
         }
     }
@@ -104,6 +80,14 @@ struct NoteEditorView: View {
     private func hideKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
+}
+
+// Observable class to hold the text view reference
+class RichTextViewHolder: ObservableObject {
+    static let shared = RichTextViewHolder()
+    @Published var textView: UITextView?
+    
+    private init() {}
 }
 
 #Preview {
@@ -116,13 +100,13 @@ struct NoteEditorView: View {
         let attributedString = NSAttributedString(string: "This is sample content")
         
         // Create sample note with archived attributed string
-        let sampleNote = ScribeNote(title: "Sample Note")
+        let sampleNote = ScribeNote(title: "Rich Text Sample")
         if let data = try? NSKeyedArchiver.archivedData(withRootObject: attributedString, requiringSecureCoding: false) {
             sampleNote.content = data
         }
         modelContext.insert(sampleNote)
         
-        return NoteEditorView(note: .constant(sampleNote), viewModel: viewModel)
+        return RichTextNoteEditorView(note: .constant(sampleNote), viewModel: viewModel)
             .modelContainer(container)
     }
     
