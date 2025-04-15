@@ -8,13 +8,16 @@ import UniformTypeIdentifiers
 struct RichTextNoteEditorView: View {
     @Binding var selectedNote: ScribeNote?
     let viewModel: NoteViewModel
-    @State private var attributedText = NSAttributedString(string: "")
-    @ObservedObject private var textViewHolder = RichTextViewHolder.shared
-    @StateObject private var formattingState = FormattingState()
+    @State var attributedText = NSAttributedString(string: "")
+    @ObservedObject var textViewHolder = RichTextViewHolder.shared
+    @StateObject var formattingState = FormattingState()
+    @State var isFormatting = false
+    @State var errorMessage: String? = nil
+    @State var showError = false
     
     // Sheet states for pickers
-    @State private var showImagePicker = false
-    @State private var showDocumentPicker = false
+    @State var showImagePicker = false
+    @State var showDocumentPicker = false
     @State private var showColorPicker = false
     
     // Add id to force view refreshes when selected note changes
@@ -69,42 +72,11 @@ struct RichTextNoteEditorView: View {
                             .accessibilityHidden(true)
                     }
                     
-                    // Modern iOS-style toolbar
-                    HStack(spacing: 16) {
-                        Spacer()
-                        
-                        // Format menu (typography)
-                        FormatMenu(formattingState: formattingState) { action in
-                            handleFormatAction(action, for: note)
-                        }
-                        
-                        // Attachment menu (files, images)
-                        AttachmentMenu(
-                            showImagePicker: $showImagePicker,
-                            showDocumentPicker: $showDocumentPicker
-                        )
-                        
-                        // Share button
-                        Button(action: {
-                            // Handle sharing - would implement share sheet
-                            let content = note.title.isEmpty ? attributedText.string : "\(note.title)\n\n\(attributedText.string)"
-                            
-                            // This would connect to a share sheet in a full implementation
-                            print("Would share: \(content)")
-                        }) {
-                            Image(systemName: "square.and.arrow.up")
-                                .font(.system(size: 17, weight: .semibold))
-                                .frame(width: 34, height: 34)
-                                .background(Color.secondary.opacity(0.1))
-                                .clipShape(Circle())
-                        }
-                    }
-                    .padding(.horizontal)
-                    .padding(.vertical, 8)
-                    .background(
-                        Color(UIColor.secondarySystemBackground)
-                            .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: -1)
-                    )
+                    // Modern iOS-style toolbar with AI formatting
+                    enhancedToolbar
+                }
+                .overlay {
+                    formattingOverlay
                 }
                 .toolbar {
                     // Keyboard toolbar
@@ -238,7 +210,7 @@ struct RichTextNoteEditorView: View {
     // Using View extension for keyboard dismissal
     
     /// Handle formatting actions from the format menu
-    private func handleFormatAction(_ action: FormatMenu.FormatAction, for note: ScribeNote) {
+    func handleFormatAction(_ action: FormatMenu.FormatAction, for note: ScribeNote) {
         // Get the text view and coordinator directly
         guard let textView = textViewHolder.textView,
               let coordinator = textView.delegate as? RichTextEditor.Coordinator else {

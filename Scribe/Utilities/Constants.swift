@@ -13,4 +13,12 @@ enum Constants {
         /// Autosave delay in milliseconds
         static let autosaveDelay: UInt64 = 500
     }
+    
+    /// API Constants
+    enum API {
+        /// OpenAI API endpoint for chat completions
+        static let openAIBaseURL = "https://api.openai.com/v1/chat/completions"
+        /// Keychain identifier for storing the API key
+        static let keychainAPIKeyIdentifier = "ScribeAIServiceAPIKey"
+    }
 }

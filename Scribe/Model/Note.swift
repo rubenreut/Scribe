@@ -1,6 +1,32 @@
 import Foundation
 import SwiftData
 import SwiftUI
+import UIKit
+
+/// Represents a folder for organizing notes
+@Model
+final class ScribeFolder {
+    var name: String
+    var icon: String
+    var colorData: Data
+    var createdAt: Date
+    
+    @Relationship var notes: [ScribeNote]?
+    
+    init(name: String, icon: String = "folder", color: UIColor = .systemBlue, createdAt: Date = Date()) {
+        self.name = name
+        self.icon = icon
+        self.colorData = try! NSKeyedArchiver.archivedData(withRootObject: color, requiringSecureCoding: true)
+        self.createdAt = createdAt
+        self.notes = []
+    }
+    
+    var color: UIColor {
+        get {
+            (try? NSKeyedUnarchiver.unarchivedObject(ofClass: UIColor.self, from: colorData)) ?? .systemBlue
+        }
+    }
+}
 
 /// Represents a note in the Scribe application
 @Model
@@ -9,6 +35,9 @@ final class ScribeNote {
     var content: Data
     var createdAt: Date
     var lastModified: Date
+    
+    // Relationship to parent folder (optional)
+    var folder: ScribeFolder?
     
     /// Creates a new note with optional parameters
     /// - Parameters:

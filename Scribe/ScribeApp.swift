@@ -24,7 +24,7 @@ struct ScribeApp: App {
             ContentView()
                 // No need to log every view appearance
         }
-        .modelContainer(for: ScribeNote.self)
+        .modelContainer(for: [ScribeNote.self, ScribeFolder.self])
         .commands {
             // Add app-specific commands
             CommandGroup(after: .newItem) {

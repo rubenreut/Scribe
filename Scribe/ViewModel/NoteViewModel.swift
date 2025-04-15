@@ -5,8 +5,8 @@ import OSLog
 
 /// ViewModel for handling note operations
 @Observable @MainActor class NoteViewModel {
-    private let logger = Logger(subsystem: "com.rubenreut.Scribe", category: "NoteViewModel")
-    private let modelContext: ModelContext
+    let logger = Logger(subsystem: "com.rubenreut.Scribe", category: "NoteViewModel")
+    let modelContext: ModelContext
     private var saveTask: Task<Void, Never>? = nil
     
     var selectedNote: ScribeNote?
