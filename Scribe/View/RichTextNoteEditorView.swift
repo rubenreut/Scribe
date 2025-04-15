@@ -12,8 +12,10 @@ struct RichTextNoteEditorView: View {
     
     // Add id to force view refreshes when selected note changes
     private var noteId: String {
-        note?.persistentModelID.description ?? "no-note"
+        note?.persistentModelID.storeIdentifier ?? "no-note"
     }
+
+
     
     private let logger = Logger(subsystem: "com.rubenreut.Scribe", category: "RichTextNoteEditorView")
     
