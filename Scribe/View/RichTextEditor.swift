@@ -78,9 +78,42 @@ struct RichTextEditor: UIViewRepresentable {
             parent.onTextChange(textView.attributedText)
         }
         
-        // Ensure text style doesn't get lost during text selection
+        // Update toolbar state based on cursor position
         func textViewDidChangeSelection(_ textView: UITextView) {
             self.textView = textView
+            
+            let cursorPosition = textView.selectedRange.location
+            
+            // If we have text and a valid cursor position
+            if cursorPosition > 0 && textView.attributedText.length > 0 {
+                // Get attributes at the cursor position (actually right before it, as cursor is between characters)
+                let attributes = textView.textStorage.attributes(at: max(0, cursorPosition - 1), effectiveRange: nil)
+                
+                // Check for font traits
+                if let font = attributes[.font] as? UIFont {
+                    parent.isBold = font.fontDescriptor.symbolicTraits.contains(.traitBold)
+                    parent.isItalic = font.fontDescriptor.symbolicTraits.contains(.traitItalic)
+                }
+                
+                // Check for underline
+                parent.isUnderlined = attributes[.underlineStyle] != nil
+                
+                // Update text color if present
+                if let color = attributes[.foregroundColor] as? UIColor {
+                    parent.textColor = Color(color)
+                }
+            } else if textView.selectedRange.length == 0 {
+                // If at beginning of text or empty text, check typing attributes
+                if let font = textView.typingAttributes[.font] as? UIFont {
+                    parent.isBold = font.fontDescriptor.symbolicTraits.contains(.traitBold)
+                    parent.isItalic = font.fontDescriptor.symbolicTraits.contains(.traitItalic)
+                } else {
+                    parent.isBold = false
+                    parent.isItalic = false
+                }
+                
+                parent.isUnderlined = textView.typingAttributes[.underlineStyle] != nil
+            }
         }
     }
 }
@@ -194,44 +227,106 @@ struct RichTextToolbar: View {
         }
     }
     
-    // Helper method to toggle font traits
-    private func toggleFontTrait(trait: UIFontDescriptor.SymbolicTraits, isActive: Bool) {
-        guard let textView = textView, textView.selectedRange.length > 0 else { return }
-        
-        let selectedRange = textView.selectedRange
-        let mutableAttrText = NSMutableAttributedString(attributedString: attributedText)
-        
-        mutableAttrText.enumerateAttribute(.font, in: selectedRange, options: []) { (value, range, _) in
-            guard let currentFont = value as? UIFont else { return }
-            
-            var traits = currentFont.fontDescriptor.symbolicTraits
-            if isActive {
-                traits.insert(trait)
-            } else {
-                traits.remove(trait)
-            }
-            
-            if let descriptor = currentFont.fontDescriptor.withSymbolicTraits(traits) {
-                let newFont = UIFont(descriptor: descriptor, size: currentFont.pointSize)
-                mutableAttrText.addAttribute(.font, value: newFont, range: range)
-            }
-        }
-        
-        attributedText = mutableAttrText
-        textView.attributedText = mutableAttrText
-        textView.selectedRange = selectedRange
-    }
-    
     // Apply bold formatting
     private func toggleBold() {
         isBold.toggle()
-        toggleFontTrait(trait: .traitBold, isActive: isBold)
+        
+        guard let textView = textView else { return }
+
+        let selectedRange = textView.selectedRange
+        
+        if selectedRange.length > 0 {
+            // Scenario: User has selected text
+            let mutableAttrText = NSMutableAttributedString(attributedString: attributedText)
+            
+            mutableAttrText.enumerateAttribute(.font, in: selectedRange) { value, range, _ in
+                let currentFont = value as? UIFont ?? UIFont.preferredFont(forTextStyle: .body)
+                var traits = currentFont.fontDescriptor.symbolicTraits
+                
+                if isBold {
+                    traits.insert(.traitBold)
+                } else {
+                    traits.remove(.traitBold)
+                }
+                
+                if let descriptor = currentFont.fontDescriptor.withSymbolicTraits(traits) {
+                    let newFont = UIFont(descriptor: descriptor, size: currentFont.pointSize)
+                    mutableAttrText.addAttribute(.font, value: newFont, range: range)
+                }
+            }
+            
+            attributedText = mutableAttrText
+            textView.attributedText = mutableAttrText
+            textView.selectedRange = selectedRange
+        } else {
+            // Scenario: No selection; set typing attributes for future input
+            var currentAttributes = textView.typingAttributes
+            let currentFont = currentAttributes[.font] as? UIFont ?? UIFont.preferredFont(forTextStyle: .body)
+            var traits = currentFont.fontDescriptor.symbolicTraits
+
+            if isBold {
+                traits.insert(.traitBold)
+            } else {
+                traits.remove(.traitBold)
+            }
+
+            if let descriptor = currentFont.fontDescriptor.withSymbolicTraits(traits) {
+                let newFont = UIFont(descriptor: descriptor, size: currentFont.pointSize)
+                currentAttributes[.font] = newFont
+                textView.typingAttributes = currentAttributes
+            }
+        }
     }
     
     // Apply italic formatting
     private func toggleItalic() {
         isItalic.toggle()
-        toggleFontTrait(trait: .traitItalic, isActive: isItalic)
+        
+        guard let textView = textView else { return }
+
+        let selectedRange = textView.selectedRange
+        
+        if selectedRange.length > 0 {
+            // Scenario: User has selected text
+            let mutableAttrText = NSMutableAttributedString(attributedString: attributedText)
+            
+            mutableAttrText.enumerateAttribute(.font, in: selectedRange) { value, range, _ in
+                let currentFont = value as? UIFont ?? UIFont.preferredFont(forTextStyle: .body)
+                var traits = currentFont.fontDescriptor.symbolicTraits
+                
+                if isItalic {
+                    traits.insert(.traitItalic)
+                } else {
+                    traits.remove(.traitItalic)
+                }
+                
+                if let descriptor = currentFont.fontDescriptor.withSymbolicTraits(traits) {
+                    let newFont = UIFont(descriptor: descriptor, size: currentFont.pointSize)
+                    mutableAttrText.addAttribute(.font, value: newFont, range: range)
+                }
+            }
+            
+            attributedText = mutableAttrText
+            textView.attributedText = mutableAttrText
+            textView.selectedRange = selectedRange
+        } else {
+            // Scenario: No selection; set typing attributes for future input
+            var currentAttributes = textView.typingAttributes
+            let currentFont = currentAttributes[.font] as? UIFont ?? UIFont.preferredFont(forTextStyle: .body)
+            var traits = currentFont.fontDescriptor.symbolicTraits
+
+            if isItalic {
+                traits.insert(.traitItalic)
+            } else {
+                traits.remove(.traitItalic)
+            }
+
+            if let descriptor = currentFont.fontDescriptor.withSymbolicTraits(traits) {
+                let newFont = UIFont(descriptor: descriptor, size: currentFont.pointSize)
+                currentAttributes[.font] = newFont
+                textView.typingAttributes = currentAttributes
+            }
+        }
     }
     
     // Apply underline formatting
@@ -242,6 +337,7 @@ struct RichTextToolbar: View {
         let selectedRange = textView.selectedRange
         
         if selectedRange.length > 0 {
+            // Scenario: User has selected text
             let mutableAttrText = NSMutableAttributedString(attributedString: attributedText)
             
             if isUnderlined {
@@ -253,6 +349,17 @@ struct RichTextToolbar: View {
             attributedText = mutableAttrText
             textView.attributedText = mutableAttrText
             textView.selectedRange = selectedRange
+        } else {
+            // Scenario: No selection; set typing attributes for future input
+            var currentAttributes = textView.typingAttributes
+            
+            if isUnderlined {
+                currentAttributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+            } else {
+                currentAttributes.removeValue(forKey: .underlineStyle)
+            }
+            
+            textView.typingAttributes = currentAttributes
         }
     }
     
@@ -260,15 +367,21 @@ struct RichTextToolbar: View {
     private func applyTextColor() {
         guard let textView = textView else { return }
         let selectedRange = textView.selectedRange
+        let uiColor = UIColor(textColor)
         
         if selectedRange.length > 0 {
+            // Scenario: User has selected text
             let mutableAttrText = NSMutableAttributedString(attributedString: attributedText)
-            let uiColor = UIColor(textColor)
             
             mutableAttrText.addAttribute(.foregroundColor, value: uiColor, range: selectedRange)
             attributedText = mutableAttrText
             textView.attributedText = mutableAttrText
             textView.selectedRange = selectedRange
+        } else {
+            // Scenario: No selection; set typing attributes for future input
+            var currentAttributes = textView.typingAttributes
+            currentAttributes[.foregroundColor] = uiColor
+            textView.typingAttributes = currentAttributes
         }
     }
     
@@ -277,22 +390,47 @@ struct RichTextToolbar: View {
         guard let textView = textView else { return }
         let selectedRange = textView.selectedRange
         
+        // Determine font size based on heading style
+        let fontSize: CGFloat
+        switch style {
+        case .title: fontSize = 24
+        case .headline: fontSize = 18
+        default: fontSize = 16
+        }
+        
+        let fontWeight = style == .body ? UIFont.Weight.regular : UIFont.Weight.bold
+        let newFont = UIFont.systemFont(ofSize: fontSize, weight: fontWeight)
+        
         if selectedRange.length > 0 {
+            // Scenario: User has selected text
             let mutableAttrText = NSMutableAttributedString(attributedString: attributedText)
             
-            let fontSize: CGFloat
-            switch style {
-            case .title: fontSize = 24
-            case .headline: fontSize = 18
-            default: fontSize = 16
+            // Preserve bold/italic traits if present
+            mutableAttrText.enumerateAttribute(.font, in: selectedRange) { value, range, _ in
+                if let currentFont = value as? UIFont {
+                    var traits = currentFont.fontDescriptor.symbolicTraits
+                    if let descriptor = newFont.fontDescriptor.withSymbolicTraits(traits) {
+                        let styledFont = UIFont(descriptor: descriptor, size: fontSize)
+                        mutableAttrText.addAttribute(.font, value: styledFont, range: range)
+                    } else {
+                        mutableAttrText.addAttribute(.font, value: newFont, range: range)
+                    }
+                } else {
+                    mutableAttrText.addAttribute(.font, value: newFont, range: range)
+                }
             }
             
-            let newFont = UIFont.systemFont(ofSize: fontSize, weight: style == .body ? .regular : .bold)
-            
-            mutableAttrText.addAttribute(.font, value: newFont, range: selectedRange)
             attributedText = mutableAttrText
             textView.attributedText = mutableAttrText
             textView.selectedRange = selectedRange
+        } else {
+            // Scenario: No selection; set typing attributes for future input
+            var currentAttributes = textView.typingAttributes
+            currentAttributes[.font] = newFont
+            textView.typingAttributes = currentAttributes
+            
+            // Update toolbar state for this font size/style
+            isBold = fontWeight == .bold
         }
     }
     
@@ -302,6 +440,7 @@ struct RichTextToolbar: View {
         let selectedRange = textView.selectedRange
         
         if selectedRange.length > 0 {
+            // Processing selected text
             let mutableAttrText = NSMutableAttributedString(attributedString: attributedText)
             let fullText = mutableAttrText.string
             
@@ -319,7 +458,6 @@ struct RichTextToolbar: View {
             let selectedText = nsString.substring(with: paragraphRange)
             let paragraphs = selectedText.components(separatedBy: "\n")
             var bulletedText = ""
-            var currentLocation = paragraphRange.location
             
             for (index, paragraph) in paragraphs.enumerated() {
                 let trimmedParagraph = paragraph.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -334,11 +472,20 @@ struct RichTextToolbar: View {
                 }
             }
             
-            // Apply the formatted text with attributes
-            let bulletedAttrs: [NSAttributedString.Key: Any] = [
-                .paragraphStyle: paragraphStyle
-            ]
-            let bulletedAttrString = NSAttributedString(string: bulletedText, attributes: bulletedAttrs)
+            // Apply the formatted text with attributes while preserving existing attributes
+            let bulletedAttrString = NSMutableAttributedString(string: bulletedText)
+            
+            // Apply paragraph style to the entire text
+            bulletedAttrString.addAttribute(.paragraphStyle, value: paragraphStyle, range: NSRange(location: 0, length: bulletedText.count))
+            
+            // Copy other attributes from original text
+            let originalAttrs = mutableAttrText.attributes(at: paragraphRange.location, effectiveRange: nil)
+            for (key, value) in originalAttrs {
+                if key != .paragraphStyle {
+                    bulletedAttrString.addAttribute(key, value: value, range: NSRange(location: 0, length: bulletedText.count))
+                }
+            }
+            
             mutableAttrText.replaceCharacters(in: paragraphRange, with: bulletedAttrString)
             
             attributedText = mutableAttrText
@@ -347,6 +494,33 @@ struct RichTextToolbar: View {
             // Set cursor position at the end of the modified text
             let newCursorPosition = paragraphRange.location + bulletedText.count
             textView.selectedRange = NSRange(location: newCursorPosition, length: 0)
+        } else {
+            // Cursor only - modify current line
+            let text = textView.text as NSString
+            let currentPosition = selectedRange.location
+            let lineRange = text.lineRange(for: NSRange(location: currentPosition, length: 0))
+            
+            // Create paragraph style with indentation
+            let paragraphStyle = NSMutableParagraphStyle()
+            paragraphStyle.headIndent = 15
+            paragraphStyle.firstLineHeadIndent = 0
+            paragraphStyle.paragraphSpacing = 4
+            
+            // Prepare for typing a bullet point
+            var currentAttributes = textView.typingAttributes
+            currentAttributes[.paragraphStyle] = paragraphStyle
+            textView.typingAttributes = currentAttributes
+            
+            // Insert bullet at current position
+            let mutableAttrText = NSMutableAttributedString(attributedString: attributedText)
+            let bulletText = "• "
+            let bulletAttrs = textView.typingAttributes
+            let bulletAttrString = NSAttributedString(string: bulletText, attributes: bulletAttrs)
+            
+            mutableAttrText.insert(bulletAttrString, at: currentPosition)
+            attributedText = mutableAttrText
+            textView.attributedText = mutableAttrText
+            textView.selectedRange = NSRange(location: currentPosition + bulletText.count, length: 0)
         }
     }
     
@@ -356,15 +530,43 @@ struct RichTextToolbar: View {
         let selectedRange = textView.selectedRange
         
         if selectedRange.length > 0 {
+            // Clear formatting on selected text
             let mutableAttrText = NSMutableAttributedString(attributedString: attributedText)
             let plainText = mutableAttrText.string.substring(with: Range(selectedRange, in: mutableAttrText.string)!)
-            let plainAttrString = NSAttributedString(string: plainText)
+            
+            // Create an attributed string with default attributes only
+            let defaultFont = UIFont.preferredFont(forTextStyle: .body)
+            let defaultAttributes: [NSAttributedString.Key: Any] = [
+                .font: defaultFont,
+                .foregroundColor: UIColor.label
+            ]
+            let plainAttrString = NSAttributedString(string: plainText, attributes: defaultAttributes)
             
             mutableAttrText.replaceCharacters(in: selectedRange, with: plainAttrString)
             
             attributedText = mutableAttrText
             textView.attributedText = mutableAttrText
             textView.selectedRange = NSRange(location: selectedRange.location, length: plainText.count)
+            
+            // Reset toolbar state
+            isBold = false
+            isItalic = false
+            isUnderlined = false
+            textColor = Color.primary
+        } else {
+            // Reset typing attributes for future input
+            let defaultFont = UIFont.preferredFont(forTextStyle: .body)
+            let defaultAttributes: [NSAttributedString.Key: Any] = [
+                .font: defaultFont,
+                .foregroundColor: UIColor.label
+            ]
+            textView.typingAttributes = defaultAttributes
+            
+            // Reset toolbar state
+            isBold = false
+            isItalic = false
+            isUnderlined = false
+            textColor = Color.primary
         }
     }
 }
