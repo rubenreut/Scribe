@@ -128,6 +128,39 @@ struct RichTextEditor: UIViewRepresentable {
             parent.onTextChange(textView.attributedText)
         }
         
+        // Method to insert a document reference/link
+        func insertDocumentLink(url: URL, filename: String) {
+            guard let textView = self.textView else { return }
+            
+            // Create a link text with the file name
+            let linkText = " 📎 \(filename) "
+            
+            // Create an attributed string with a link
+            let linkAttributes: [NSAttributedString.Key: Any] = [
+                .link: url,
+                .foregroundColor: UIColor.systemBlue,
+                .underlineStyle: NSUnderlineStyle.single.rawValue,
+                .backgroundColor: UIColor.systemGray6
+            ]
+            
+            let linkString = NSAttributedString(string: linkText, attributes: linkAttributes)
+            
+            // Insert at the current cursor location
+            let mutableAttrString = NSMutableAttributedString(attributedString: textView.attributedText)
+            let selectedRange = textView.selectedRange
+            mutableAttrString.insert(linkString, at: selectedRange.location)
+            
+            // Update textView
+            textView.attributedText = mutableAttrString
+            
+            // Move cursor after the inserted link
+            textView.selectedRange = NSRange(location: selectedRange.location + linkText.count, length: 0)
+            
+            // Notify parent SwiftUI view about changes
+            parent.attributedText = textView.attributedText
+            parent.onTextChange(textView.attributedText)
+        }
+        
         // Update toolbar state based on cursor position
         func textViewDidChangeSelection(_ textView: UITextView) {
             self.textView = textView
@@ -201,11 +234,23 @@ struct RichTextEditor: UIViewRepresentable {
 
 /// A toolbar for rich text editing actions
 struct RichTextToolbar: View {
+    // Singleton instance for external access
+    static var shared: RichTextToolbar?
+    
     @Binding var attributedText: NSAttributedString
     let textView: UITextView?  // Reference to the active UITextView
     
     // Shared formatting state
     @ObservedObject var formattingState: FormattingState
+    
+    init(attributedText: Binding<NSAttributedString>, textView: UITextView?, formattingState: FormattingState) {
+        self._attributedText = attributedText
+        self.textView = textView
+        self.formattingState = formattingState
+        
+        // Set shared instance
+        Self.shared = self
+    }
     
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -316,7 +361,7 @@ struct RichTextToolbar: View {
     @State private var showColorPickerVisible = false
     
     // Apply bold formatting
-    private func toggleBold() {
+    func toggleBold() {
         formattingState.isBold.toggle()
         
         guard let textView = textView else { return }
@@ -393,7 +438,7 @@ struct RichTextToolbar: View {
     }
     
     // Apply italic formatting
-    private func toggleItalic() {
+    func toggleItalic() {
         formattingState.isItalic.toggle()
         
         guard let textView = textView else { return }
@@ -444,7 +489,7 @@ struct RichTextToolbar: View {
     }
     
     // Apply underline formatting
-    private func toggleUnderline() {
+    func toggleUnderline() {
         formattingState.isUnderlined.toggle()
         
         guard let textView = textView else { return }
@@ -478,7 +523,7 @@ struct RichTextToolbar: View {
     }
     
     // Apply text color
-    private func applyTextColor() {
+    func applyTextColor() {
         guard let textView = textView else { return }
         let selectedRange = textView.selectedRange
         let uiColor = UIColor(formattingState.textColor)
@@ -508,7 +553,7 @@ struct RichTextToolbar: View {
     }
     
     // Apply heading format
-    private func applyHeading(_ style: Font.TextStyle) {
+    func applyHeading(_ style: Font.TextStyle) {
         guard let textView = textView else { return }
         let selectedRange = textView.selectedRange
         
@@ -557,7 +602,7 @@ struct RichTextToolbar: View {
     }
     
     // Apply bullet points more efficiently using paragraph style
-    private func applyBulletPoints() {
+    func applyBulletPoints() {
         guard let textView = textView else { return }
         let selectedRange = textView.selectedRange
         
@@ -647,7 +692,7 @@ struct RichTextToolbar: View {
     }
     
     // Clear all formatting
-    private func clearFormatting() {
+    func clearFormatting() {
         guard let textView = textView else { return }
         let selectedRange = textView.selectedRange
         

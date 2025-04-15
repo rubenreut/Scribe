@@ -2,22 +2,25 @@ import SwiftUI
 import UIKit
 import SwiftData
 import OSLog
+import UniformTypeIdentifiers
 
 /// View for editing a note with rich text formatting capabilities
 struct RichTextNoteEditorView: View {
-    @Binding var selectedNote: ScribeNote? // Renamed from 'note' to 'selectedNote'
+    @Binding var selectedNote: ScribeNote?
     let viewModel: NoteViewModel
     @State private var attributedText = NSAttributedString(string: "")
     @ObservedObject private var textViewHolder = RichTextViewHolder.shared
     @StateObject private var formattingState = FormattingState()
+    
+    // Sheet states for pickers
     @State private var showImagePicker = false
+    @State private var showDocumentPicker = false
+    @State private var showColorPicker = false
     
     // Add id to force view refreshes when selected note changes
     private var noteId: String {
         selectedNote?.persistentModelID.storeIdentifier ?? "no-note"
     }
-
-
     
     private let logger = Logger(subsystem: "com.rubenreut.Scribe", category: "RichTextNoteEditorView")
     
@@ -25,7 +28,7 @@ struct RichTextNoteEditorView: View {
         Group {
             if let note = selectedNote {
                 VStack(spacing: 0) {
-                    // Title field
+                    // Title field with iOS-style appearance
                     TextField("Title", text: Binding(
                         get: { note.title },
                         set: { newValue in
@@ -33,9 +36,19 @@ struct RichTextNoteEditorView: View {
                         }
                     ))
                     .font(.largeTitle)
+                    .fontWeight(.bold)
                     .padding([.horizontal, .top])
                     .textFieldStyle(.plain)
                     .accessibilityIdentifier("note-title-field")
+                    
+                    HStack {
+                        Text(note.lastModified, style: .date)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom, 4)
                     
                     Divider()
                         .padding(.horizontal)
@@ -45,47 +58,103 @@ struct RichTextNoteEditorView: View {
                         // Update the note's content directly with NSAttributedString
                         viewModel.updateNoteContent(note, newContent: newText)
                     }, formattingState: formattingState)
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, 4)
                     
-                    // Formatting toolbar
-                    RichTextToolbar(attributedText: $attributedText, textView: textViewHolder.textView, formattingState: formattingState)
-                    
-                    // Last edited timestamp
-                    HStack {
-                        Spacer()
-                        Text("Last edited: \(note.lastModified, style: .relative)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal)
-                            .accessibilityLabel("Last edited \(note.lastModified.formatted())")
-                    }
-                    .padding(.bottom, 4)
-                }
-                .toolbar {
-                    ToolbarItemGroup(placement: .keyboard) {
+                    // Modern iOS-style toolbar
+                    HStack(spacing: 16) {
                         Spacer()
                         
-                        Button("Done") {
-                            hideKeyboard()
+                        // Format menu (typography)
+                        FormatMenu(formattingState: formattingState) { action in
+                            handleFormatAction(action, for: note)
                         }
-                        .accessibilityIdentifier("keyboard-done-button")
+                        
+                        // Attachment menu (files, images)
+                        AttachmentMenu(
+                            showImagePicker: $showImagePicker,
+                            showDocumentPicker: $showDocumentPicker
+                        )
+                        
+                        // Share button
+                        Button(action: {
+                            // Handle sharing functionality
+                        }) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 17, weight: .semibold))
+                                .frame(width: 34, height: 34)
+                                .background(Color.secondary.opacity(0.1))
+                                .clipShape(Circle())
+                        }
                     }
-                    
-                    // Add image insertion button to main toolbar
-                    ToolbarItem(placement: .primaryAction) {
-                        Button(action: { showImagePicker = true }) {
-                            Image(systemName: "photo")
-                                .foregroundColor(.accentColor)
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                    .background(
+                        Color(UIColor.secondarySystemBackground)
+                            .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: -1)
+                    )
+                }
+                .toolbar {
+                    // Keyboard toolbar
+                    ToolbarItemGroup(placement: .keyboard) {
+                        HStack {
+                            // Bold/Italic/Underline quick access in keyboard toolbar
+                            Button(action: { handleFormatAction(.bold, for: note) }) {
+                                Image(systemName: "bold")
+                                    .foregroundColor(formattingState.isBold ? .accentColor : .primary)
+                            }
+                            
+                            Button(action: { handleFormatAction(.italic, for: note) }) {
+                                Image(systemName: "italic")
+                                    .foregroundColor(formattingState.isItalic ? .accentColor : .primary)
+                            }
+                            
+                            Button(action: { handleFormatAction(.underline, for: note) }) {
+                                Image(systemName: "underline")
+                                    .foregroundColor(formattingState.isUnderlined ? .accentColor : .primary)
+                            }
+                            
+                            Spacer()
+                            
+                            Button("Done") {
+                                hideKeyboard()
+                            }
+                            .fontWeight(.semibold)
                         }
-                        .accessibilityLabel("Insert Image")
                     }
                 }
+                // Handle various sheet presentations
                 .sheet(isPresented: $showImagePicker) {
                     ImagePicker { selectedImage in
                         if let coordinator = textViewHolder.textView?.delegate as? RichTextEditor.Coordinator {
                             coordinator.insertImage(selectedImage)
                         }
                     }
+                }
+                .sheet(isPresented: $showDocumentPicker) {
+                    DocumentPicker { fileURL in
+                        if let coordinator = textViewHolder.textView?.delegate as? RichTextEditor.Coordinator {
+                            coordinator.insertDocumentLink(url: fileURL, filename: fileURL.lastPathComponent)
+                        }
+                    }
+                }
+                .sheet(isPresented: $showColorPicker) {
+                    VStack {
+                        Text("Text Color")
+                            .font(.headline)
+                            .padding()
+                        
+                        ColorPicker("Select Color", selection: $formattingState.textColor)
+                            .labelsHidden()
+                            .padding()
+                        
+                        Button("Apply") {
+                            handleFormatAction(.textColor, for: note)
+                            showColorPicker = false
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .padding()
+                    }
+                    .presentationDetents([.height(200)])
                 }
                 // Use id to force full view rebuild when note changes
                 .id(noteId)
@@ -152,6 +221,52 @@ struct RichTextNoteEditorView: View {
     }
     
     // Using View extension for keyboard dismissal
+    
+    /// Handle formatting actions from the format menu
+    private func handleFormatAction(_ action: FormatMenu.FormatAction, for note: ScribeNote) {
+        // Find toolbar instance
+        let toolbar = RichTextToolbar.shared
+        
+        switch action {
+        case .bold:
+            // For these direct actions, we can toggle state even if toolbar is missing
+            formattingState.isBold.toggle()
+            toolbar?.toggleBold()
+            
+        case .italic:
+            formattingState.isItalic.toggle()
+            toolbar?.toggleItalic()
+            
+        case .underline:
+            formattingState.isUnderlined.toggle()
+            toolbar?.toggleUnderline()
+            
+        case .heading(let style):
+            toolbar?.applyHeading(style)
+            
+        case .textColor:
+            // Show color picker if not already visible
+            if !showColorPicker {
+                showColorPicker = true
+            } else {
+                // Apply current color selection
+                toolbar?.applyTextColor()
+            }
+            
+        case .bulletList:
+            toolbar?.applyBulletPoints()
+            
+        case .clearFormatting:
+            // Reset state for UI consistency
+            formattingState.isBold = false
+            formattingState.isItalic = false
+            formattingState.isUnderlined = false
+            formattingState.textColor = .primary
+            
+            // Clear formatting in the editor
+            toolbar?.clearFormatting()
+        }
+    }
 }
 
 // Observable class to hold the text view reference
