@@ -45,12 +45,13 @@ struct ContentView: View {
                         }
                     }
                     
+                    
                     // Rich text toggle button removed - always using rich text editor
                 }
             }
         } detail: {
             // Only show the rich text editor
-            RichTextNoteEditorView(note: $viewModel.selectedNote, viewModel: viewModel)
+            RichTextNoteEditorView(selectedNote: $viewModel.selectedNote, viewModel: viewModel)
         }
         .navigationSplitViewStyle(.balanced)
         .onAppear {

@@ -65,6 +65,8 @@ import OSLog
     /// Updates a note's content with NSAttributedString and marks it as modified
     func updateNoteContent(_ note: ScribeNote, newContent: NSAttributedString) {
         do {
+            // Ensure secure coding for images in NSTextAttachments
+            NSAttributedString.registerAttributedStringCoder(for: newContent)
             note.content = try NSKeyedArchiver.archivedData(withRootObject: newContent, requiringSecureCoding: true)
             note.lastModified = Date()
             saveChanges()
@@ -75,11 +77,21 @@ import OSLog
     
     /// Retrieves the attributed content for a note
     func attributedContent(for note: ScribeNote) -> NSAttributedString {
-        guard !note.content.isEmpty,
-              let content = try? NSKeyedUnarchiver.unarchiveTopLevelObjectWithData(note.content) as? NSAttributedString else {
+        guard !note.content.isEmpty else {
             return NSAttributedString(string: "")
         }
-        return content
+        
+        do {
+            // Register necessary classes for secure coding
+            NSKeyedUnarchiver.setClass(NSTextAttachment.self, forClassName: "NSTextAttachment")
+            NSKeyedUnarchiver.setClass(UIImage.self, forClassName: "UIImage")
+            
+            let content = try NSKeyedUnarchiver.unarchiveTopLevelObjectWithData(note.content) as? NSAttributedString
+            return content ?? NSAttributedString(string: "")
+        } catch {
+            logger.error("Unarchiving error: \(error.localizedDescription)")
+            return NSAttributedString(string: "")
+        }
     }
     
     /// Deletes the specified notes
@@ -129,5 +141,19 @@ import OSLog
                       content.localizedStandardContains(searchText)
             }
         }
+    }
+    
+}
+
+// Extension to ensure NSAttributedString can be properly archived with attachments
+extension NSAttributedString {
+    static func registerAttributedStringCoder(for attributedString: NSAttributedString) {
+        // Register NSTextAttachment for secure coding
+        NSKeyedArchiver.setClassName("NSTextAttachment", for: NSTextAttachment.self)
+        NSKeyedUnarchiver.setClass(NSTextAttachment.self, forClassName: "NSTextAttachment")
+        
+        // Register UIImage for secure coding
+        NSKeyedArchiver.setClassName("UIImage", for: UIImage.self)
+        NSKeyedUnarchiver.setClass(UIImage.self, forClassName: "UIImage")
     }
 }
