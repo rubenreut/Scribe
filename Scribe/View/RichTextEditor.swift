@@ -24,10 +24,20 @@ struct RichTextEditor: UIViewRepresentable {
     func makeUIView(context: Context) -> UITextView {
         let textView = UITextView()
         textView.delegate = context.coordinator
-        textView.attributedText = attributedText
         textView.backgroundColor = backgroundColor
         textView.tintColor = tintColor
-        textView.font = .preferredFont(forTextStyle: .body)
+        
+        // Use body text as default styling
+        let bodyFont = UIFont.preferredFont(forTextStyle: .body)
+        textView.font = bodyFont
+        
+        // Set default typing attributes for consistent formatting
+        textView.typingAttributes = [
+            .font: bodyFont,
+            .foregroundColor: UIColor.label
+        ]
+        
+        // Configure text view behavior
         textView.isScrollEnabled = true
         textView.isEditable = true
         textView.isUserInteractionEnabled = true
@@ -37,6 +47,21 @@ struct RichTextEditor: UIViewRepresentable {
         textView.dataDetectorTypes = [.link]
         textView.isSelectable = true
         
+        // Improve performance by setting these properties
+        textView.layoutManager.allowsNonContiguousLayout = false
+        textView.textContainerInset = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        
+        // Ensure content text is applied before setting references
+        if attributedText.length > 0 {
+            textView.attributedText = attributedText
+        } else {
+            // If there's no text, create an empty attributed string with body formatting
+            textView.attributedText = NSAttributedString(
+                string: "",
+                attributes: [.font: bodyFont, .foregroundColor: UIColor.label]
+            )
+        }
+        
         // Important: Set this in the coordinator
         context.coordinator.textView = textView
         
@@ -45,26 +70,42 @@ struct RichTextEditor: UIViewRepresentable {
             RichTextViewHolder.shared.textView = textView
         }
         
-        // Ensure proper formatting is preserved by reapplying
-        textView.attributedText = attributedText
-        
         return textView
     }
     
     func updateUIView(_ textView: UITextView, context: Context) {
-        if textView.attributedText.string != attributedText.string {
-            // Save cursor position
+        // Only update if the text has actually changed to prevent unnecessary refreshes
+        let textViewString = textView.attributedText.string
+        let newString = attributedText.string
+        
+        if textViewString != newString || textView.attributedText.length != attributedText.length {
+            // Save cursor position and selection state
             let selectedRange = textView.selectedRange
+            let isFirstResponder = textView.isFirstResponder
             
-            // Only update if content actually changed
+            // Disable delegate temporarily to prevent unwanted calls
+            let oldDelegate = textView.delegate
+            textView.delegate = nil
+            
+            // Update the text
             textView.attributedText = attributedText
+            
+            // Re-enable delegate
+            textView.delegate = oldDelegate
             
             // Restore cursor position with thorough bounds checking
             if NSLocationInRange(selectedRange.location, NSRange(location: 0, length: attributedText.length)) {
                 textView.selectedRange = selectedRange
-            } else {
+            } else if attributedText.length > 0 {
                 // If cursor was outside valid range, place at end of text
-                textView.selectedRange = NSRange(location: attributedText.length, length: 0)
+                textView.selectedRange = NSRange(location: min(selectedRange.location, attributedText.length), length: 0)
+            } else {
+                textView.selectedRange = NSRange(location: 0, length: 0)
+            }
+            
+            // Make sure first responder state is preserved
+            if isFirstResponder && !textView.isFirstResponder {
+                textView.becomeFirstResponder()
             }
         }
     }
@@ -83,15 +124,33 @@ struct RichTextEditor: UIViewRepresentable {
         
         func textViewDidChange(_ textView: UITextView) {
             self.textView = textView
-            parent.attributedText = textView.attributedText
-            parent.onTextChange(textView.attributedText)
+            
+            // Create non-mutable copy of the text to avoid reference issues
+            let textCopy = NSAttributedString(attributedString: textView.attributedText)
+            
+            // Optimize for large content changes
+            let shouldDelayUpdate = textView.text.count > 1000
+                                
+            // For smaller content, update immediately
+            if !shouldDelayUpdate {
+                self.parent.attributedText = textCopy
+                self.parent.onTextChange(textCopy)
+            } else {
+                // For larger content, batch updates with slight delay to prevent lag
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    self.parent.attributedText = textCopy
+                    self.parent.onTextChange(textCopy)
+                }
+            }
         }
         
         // Add this to ensure styling is preserved when view appears/reappears
         func textViewDidEndEditing(_ textView: UITextView) {
             // Save the final attributed text when editing ends
-            parent.attributedText = textView.attributedText
-            parent.onTextChange(textView.attributedText)
+            let textCopy = NSAttributedString(attributedString: textView.attributedText)
+            self.parent.attributedText = textCopy
+            self.parent.onTextChange(textCopy)
         }
         
         // Method to insert images into the rich text
@@ -165,69 +224,85 @@ struct RichTextEditor: UIViewRepresentable {
         func textViewDidChangeSelection(_ textView: UITextView) {
             self.textView = textView
             
+            // Throttle updates to formatting state to prevent lag
+            // Only update if selection is stable
+            let currentSelection = textView.selectedRange
+            let shouldUpdateFormatting = currentSelection.location != 0 || currentSelection.length > 0
+            
+            // Update the shared text view holder outside the main state update
+            // to prevent performance issues
+            RichTextViewHolder.shared.textView = textView
+            
+            // Don't update formatting state if text is empty
+            if textView.text.isEmpty {
+                self.resetFormattingState()
+                return
+            }
+            
+            // We only want to update if we have a valid position that makes sense to check
+            if shouldUpdateFormatting {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self, 
+                          let textView = self.textView,
+                          textView.selectedRange == currentSelection else { return }
+                    
+                    self.updateFormattingState(for: textView)
+                }
+            }
+        }
+        
+        // Helper to update formatting state without duplicating code
+        private func updateFormattingState(for textView: UITextView) {
             let cursorPosition = textView.selectedRange.location
             let selectionLength = textView.selectedRange.length
             
-            // Update the shared text view holder
-            DispatchQueue.main.async {
-                RichTextViewHolder.shared.textView = textView
+            // If we have a selection, check the attributes of the first character
+            if selectionLength > 0 && textView.attributedText.length > cursorPosition {
+                self.updateFormattingFromAttributes(
+                    textView.textStorage.attributes(at: cursorPosition, effectiveRange: nil)
+                )
+            }
+            // If we have just a cursor and it's not at the start, check character to the left
+            else if selectionLength == 0 && cursorPosition > 0 && textView.attributedText.length >= cursorPosition {
+                self.updateFormattingFromAttributes(
+                    textView.textStorage.attributes(at: cursorPosition - 1, effectiveRange: nil)
+                )
+            }
+            // If at beginning of text, check typing attributes for future input
+            else {
+                self.updateFormattingFromAttributes(textView.typingAttributes)
+            }
+        }
+        
+        // Helper to update the format state from attributes dictionary
+        private func updateFormattingFromAttributes(_ attributes: [NSAttributedString.Key: Any]) {
+            // Check for font traits
+            if let font = attributes[.font] as? UIFont {
+                self.parent.formattingState.isBold = font.fontDescriptor.symbolicTraits.contains(.traitBold)
+                self.parent.formattingState.isItalic = font.fontDescriptor.symbolicTraits.contains(.traitItalic)
+            } else {
+                // Default state if no font
+                self.parent.formattingState.isBold = false
+                self.parent.formattingState.isItalic = false
             }
             
-            // If we have a selection, check the attributes of the first character in the selection
-            if selectionLength > 0 && textView.attributedText.length > 0 {
-                let attributes = textView.textStorage.attributes(at: cursorPosition, effectiveRange: nil)
-                
-                // Check for font traits
-                if let font = attributes[.font] as? UIFont {
-                    parent.formattingState.isBold = font.fontDescriptor.symbolicTraits.contains(.traitBold)
-                    parent.formattingState.isItalic = font.fontDescriptor.symbolicTraits.contains(.traitItalic)
-                }
-                
-                // Check for underline
-                parent.formattingState.isUnderlined = attributes[.underlineStyle] != nil
-                
-                // Update text color if present
-                if let color = attributes[.foregroundColor] as? UIColor {
-                    parent.formattingState.textColor = Color(color)
-                }
-            } 
-            // If we have just a cursor (no selection) and it's not at the start, check character to the left
-            else if selectionLength == 0 && cursorPosition > 0 && textView.attributedText.length > 0 {
-                // Get attributes at the cursor position (right before it, as cursor is between characters)
-                let attributes = textView.textStorage.attributes(at: cursorPosition - 1, effectiveRange: nil)
-                
-                // Check for font traits
-                if let font = attributes[.font] as? UIFont {
-                    parent.formattingState.isBold = font.fontDescriptor.symbolicTraits.contains(.traitBold)
-                    parent.formattingState.isItalic = font.fontDescriptor.symbolicTraits.contains(.traitItalic)
-                }
-                
-                // Check for underline
-                parent.formattingState.isUnderlined = attributes[.underlineStyle] != nil
-                
-                // Update text color if present
-                if let color = attributes[.foregroundColor] as? UIColor {
-                    parent.formattingState.textColor = Color(color)
-                }
-            } 
-            // If at beginning of text or empty text, check typing attributes for future input
-            else {
-                if let font = textView.typingAttributes[.font] as? UIFont {
-                    parent.formattingState.isBold = font.fontDescriptor.symbolicTraits.contains(.traitBold)
-                    parent.formattingState.isItalic = font.fontDescriptor.symbolicTraits.contains(.traitItalic)
-                } else {
-                    parent.formattingState.isBold = false
-                    parent.formattingState.isItalic = false
-                }
-                
-                parent.formattingState.isUnderlined = textView.typingAttributes[.underlineStyle] != nil
-                
-                if let color = textView.typingAttributes[.foregroundColor] as? UIColor {
-                    parent.formattingState.textColor = Color(color)
-                } else {
-                    parent.formattingState.textColor = .primary
-                }
+            // Check for underline
+            self.parent.formattingState.isUnderlined = attributes[.underlineStyle] != nil
+            
+            // Update text color if present
+            if let color = attributes[.foregroundColor] as? UIColor {
+                self.parent.formattingState.textColor = Color(color)
+            } else {
+                self.parent.formattingState.textColor = .primary
             }
+        }
+        
+        // Reset formatting state to defaults
+        private func resetFormattingState() {
+            self.parent.formattingState.isBold = false
+            self.parent.formattingState.isItalic = false
+            self.parent.formattingState.isUnderlined = false
+            self.parent.formattingState.textColor = .primary
         }
     }
 }
@@ -253,108 +328,19 @@ struct RichTextToolbar: View {
     }
     
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                // Text Style Group
-                Group {
-                    // Bold button
-                    Button(action: toggleBold) {
-                        Image(systemName: "bold")
-                            .padding(6)
-                            .background(formattingState.isBold ? Color.accentColor.opacity(0.2) : Color.clear)
-                            .cornerRadius(6)
+        // We're not displaying the traditional toolbar in the new UI design
+        // But we need to keep the toolbar structure for the formatting methods
+        Color.clear.frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .id(1000) // Add a tag that can be found for direct method access
+            .sheet(isPresented: $showColorPickerVisible) {
+                ColorPicker("Text Color", selection: $formattingState.textColor)
+                    .padding()
+                    .onChange(of: formattingState.textColor) { [self] _ in
+                        self.applyTextColor()
                     }
-                    .accessibilityLabel("Bold")
-                    
-                    // Italic button
-                    Button(action: toggleItalic) {
-                        Image(systemName: "italic")
-                            .padding(6)
-                            .background(formattingState.isItalic ? Color.accentColor.opacity(0.2) : Color.clear)
-                            .cornerRadius(6)
-                    }
-                    .accessibilityLabel("Italic")
-                    
-                    // Underline button
-                    Button(action: toggleUnderline) {
-                        Image(systemName: "underline")
-                            .padding(6)
-                            .background(formattingState.isUnderlined ? Color.accentColor.opacity(0.2) : Color.clear)
-                            .cornerRadius(6)
-                    }
-                    .accessibilityLabel("Underline")
-                }
-                
-                Divider()
-                    .frame(height: 20)
-                
-                // Color picker - more compact
-                Button(action: { showColorPickerVisible.toggle() }) {
-                    Image(systemName: "paintpalette")
-                        .padding(6)
-                        .foregroundColor(formattingState.textColor)
-                }
-                .accessibilityLabel("Text Color")
-                
-                Divider()
-                    .frame(height: 20)
-                
-                // Paragraph Style Group
-                Group {
-                    // Heading 1
-                    Button(action: { applyHeading(.title) }) {
-                        Image(systemName: "textformat.size")
-                            .padding(6)
-                    }
-                    .accessibilityLabel("Heading 1")
-                    
-                    // Heading 2
-                    Button(action: { applyHeading(.headline) }) {
-                        Image(systemName: "textformat.size.smaller")
-                            .padding(6)
-                    }
-                    .accessibilityLabel("Heading 2")
-                    
-                    // Body text
-                    Button(action: { applyHeading(.body) }) {
-                        Image(systemName: "text.justify")
-                            .padding(6)
-                    }
-                    .accessibilityLabel("Body text")
-                }
-                
-                Divider()
-                    .frame(height: 20)
-                
-                // List and bullets
-                Button(action: applyBulletPoints) {
-                    Image(systemName: "list.bullet")
-                        .padding(6)
-                }
-                .accessibilityLabel("Bullet list")
-                
-                // Clear formatting
-                Button(action: clearFormatting) {
-                    Image(systemName: "eraser")
-                        .padding(6)
-                }
-                .accessibilityLabel("Clear formatting")
+                    .presentationDetents([.height(200)])
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-        }
-        .frame(height: 48)
-        .background(Color(UIColor.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .padding(.horizontal, 4)
-        .sheet(isPresented: $showColorPickerVisible) {
-            ColorPicker("Text Color", selection: $formattingState.textColor)
-                .padding()
-                .onChange(of: formattingState.textColor) { _ in
-                    applyTextColor()
-                }
-                .presentationDetents([.height(200)])
-        }
     }
     
     // State for color picker sheet

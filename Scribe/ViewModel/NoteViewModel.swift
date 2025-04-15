@@ -21,6 +21,22 @@ import OSLog
     /// Creates a new note and selects it
     func createNewNote() {
         let newNote = ScribeNote()
+        
+        // Add an empty attributed string with default body styling
+        let bodyFont = UIFont.preferredFont(forTextStyle: .body)
+        let defaultAttributes: [NSAttributedString.Key: Any] = [
+            .font: bodyFont,
+            .foregroundColor: UIColor.label
+        ]
+        let emptyText = NSAttributedString(string: "", attributes: defaultAttributes)
+        
+        // Save the default styling
+        do {
+            newNote.content = try NSKeyedArchiver.archivedData(withRootObject: emptyText, requiringSecureCoding: true)
+        } catch {
+            logger.error("Failed to initialize note with default styling: \(error.localizedDescription)")
+        }
+        
         modelContext.insert(newNote)
         selectedNote = newNote
         
