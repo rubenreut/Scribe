@@ -10,6 +10,11 @@ struct RichTextNoteEditorView: View {
     @State private var attributedText = NSAttributedString(string: "")
     @ObservedObject private var textViewHolder = RichTextViewHolder.shared
     
+    // Add id to force view refreshes when selected note changes
+    private var noteId: String {
+        note?.persistentModelID.description ?? "no-note"
+    }
+    
     private let logger = Logger(subsystem: "com.rubenreut.Scribe", category: "RichTextNoteEditorView")
     
     var body: some View {
@@ -62,10 +67,18 @@ struct RichTextNoteEditorView: View {
                         .accessibilityIdentifier("keyboard-done-button")
                     }
                 }
+                // Use id to force full view rebuild when note changes
+                .id(noteId)
                 .onAppear {
                     // Load the attributed string directly from the note
                     attributedText = viewModel.attributedContent(for: note)
-                    // Rich text editor loaded
+                    
+                    // Ensure textView updates properly with correct styling
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        if let tv = textViewHolder.textView {
+                            tv.attributedText = attributedText
+                        }
+                    }
                 }
             } else {
                 ContentUnavailableView {

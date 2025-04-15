@@ -13,7 +13,8 @@ import Foundation
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var viewModel: NoteViewModel
-    @AppStorage("useRichText") private var useRichText: Bool = true
+    // Always use rich text - remove toggle functionality
+    private let useRichText: Bool = true
     
     init() {
         // This will be properly initialized when the @Environment is available
@@ -44,31 +45,12 @@ struct ContentView: View {
                         }
                     }
                     
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button {
-                            useRichText.toggle()
-                        } label: {
-                            Label(
-                                useRichText ? "Plain Text" : "Rich Text", 
-                                systemImage: useRichText ? "doc.plaintext" : "textformat"
-                            )
-                        }
-                        .accessibilityLabel("Toggle Rich Text Editing")
-                    }
+                    // Rich text toggle button removed - always using rich text editor
                 }
             }
         } detail: {
-            // Conditionally show either rich text or plain text editor
-            ZStack {
-                if useRichText {
-                    RichTextNoteEditorView(note: $viewModel.selectedNote, viewModel: viewModel)
-                        .transition(.opacity)
-                } else {
-                    NoteEditorView(note: $viewModel.selectedNote, viewModel: viewModel)
-                        .transition(.opacity)
-                }
-            }
-            .animation(.easeInOut(duration: 0.3), value: useRichText)
+            // Only show the rich text editor
+            RichTextNoteEditorView(note: $viewModel.selectedNote, viewModel: viewModel)
         }
         .navigationSplitViewStyle(.balanced)
         .onAppear {

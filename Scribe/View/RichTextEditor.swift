@@ -25,12 +25,15 @@ struct RichTextEditor: UIViewRepresentable {
         textView.allowsEditingTextAttributes = true
         textView.dataDetectorTypes = [.link]
         textView.isSelectable = true
+        
+        // Important: Set this in the coordinator
         context.coordinator.textView = textView
         
-        // Store reference in the shared holder
-        DispatchQueue.main.async {
-            RichTextViewHolder.shared.textView = textView
-        }
+        // Store reference in the shared holder immediately
+        RichTextViewHolder.shared.textView = textView
+        
+        // Ensure proper formatting is preserved by reapplying
+        textView.attributedText = attributedText
         
         return textView
     }
@@ -66,6 +69,18 @@ struct RichTextEditor: UIViewRepresentable {
             self.textView = textView
             parent.attributedText = textView.attributedText
             parent.onTextChange(textView.attributedText)
+        }
+        
+        // Add this to ensure styling is preserved when view appears/reappears
+        func textViewDidEndEditing(_ textView: UITextView) {
+            // Save the final attributed text when editing ends
+            parent.attributedText = textView.attributedText
+            parent.onTextChange(textView.attributedText)
+        }
+        
+        // Ensure text style doesn't get lost during text selection
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            self.textView = textView
         }
     }
 }
