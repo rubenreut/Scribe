@@ -8,7 +8,6 @@
 import SwiftUI
 import SwiftData
 import Foundation
-import UIKit
 
 /// Main content view showing split navigation between note list and editor
 struct ContentView: View {
@@ -78,11 +77,6 @@ struct ContentView: View {
             
             // Refresh notes on appear to ensure we have the latest data
             viewModel.refreshNotes()
-            
-            // Set up a timer to periodically refresh notes
-            Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-                viewModel.refreshNotes()
-            }
         }
         .onReceive(NotificationCenter.default.publisher(for: Constants.NotificationNames.createNewNote)) { _ in
             viewModel.createNewNote()

@@ -70,7 +70,7 @@ struct NoteRowView: View {
         
         // Create sample note with archived attributed string
         let sampleNote = ScribeNote(title: "Sample Note")
-        if let data = try? NSKeyedArchiver.archivedData(withRootObject: attributedString, requiringSecureCoding: false) {
+        if let data = try? NSKeyedArchiver.archivedData(withRootObject: attributedString, requiringSecureCoding: true) {
             sampleNote.content = data
         }
         modelContext.insert(sampleNote)

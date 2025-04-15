@@ -1,6 +1,8 @@
 import SwiftUI
 import SwiftData
 import OSLog
+// Import view extensions
+import UIKit
 
 /// View for editing a single note
 struct NoteEditorView: View {
@@ -95,15 +97,11 @@ struct NoteEditorView: View {
             }
         }
         .task(id: note?.persistentModelID) {
-            if note != nil {
-                logger.debug("Started editing note")
-            }
+            // No need to log routine view appearance
         }
     }
     
-    private func hideKeyboard() {
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-    }
+    // Using View extension for keyboard dismissal
 }
 
 #Preview {
@@ -117,7 +115,7 @@ struct NoteEditorView: View {
         
         // Create sample note with archived attributed string
         let sampleNote = ScribeNote(title: "Sample Note")
-        if let data = try? NSKeyedArchiver.archivedData(withRootObject: attributedString, requiringSecureCoding: false) {
+        if let data = try? NSKeyedArchiver.archivedData(withRootObject: attributedString, requiringSecureCoding: true) {
             sampleNote.content = data
         }
         modelContext.insert(sampleNote)

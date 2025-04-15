@@ -16,16 +16,13 @@ struct ScribeApp: App {
     private let logger = Logger(subsystem: "com.rubenreut.Scribe", category: "Application")
     
     init() {
-        logger.info("Application starting up")
         configureLogger()
     }
     
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .onAppear {
-                    logger.debug("ContentView appeared")
-                }
+                // No need to log every view appearance
         }
         .modelContainer(for: ScribeNote.self)
         .commands {
@@ -43,7 +40,7 @@ struct ScribeApp: App {
     private func configureLogger() {
         #if DEBUG
         // More verbose in debug builds
-        logger.debug("Debug logging enabled")
+        // Debug logging enabled
         #endif
     }
 }

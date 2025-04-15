@@ -65,7 +65,7 @@ struct RichTextNoteEditorView: View {
                 .onAppear {
                     // Load the attributed string directly from the note
                     attributedText = viewModel.attributedContent(for: note)
-                    logger.debug("Started editing note with rich text")
+                    // Rich text editor loaded
                 }
             } else {
                 ContentUnavailableView {
@@ -77,9 +77,7 @@ struct RichTextNoteEditorView: View {
         }
     }
     
-    private func hideKeyboard() {
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-    }
+    // Using View extension for keyboard dismissal
 }
 
 // Observable class to hold the text view reference
@@ -101,7 +99,7 @@ class RichTextViewHolder: ObservableObject {
         
         // Create sample note with archived attributed string
         let sampleNote = ScribeNote(title: "Rich Text Sample")
-        if let data = try? NSKeyedArchiver.archivedData(withRootObject: attributedString, requiringSecureCoding: false) {
+        if let data = try? NSKeyedArchiver.archivedData(withRootObject: attributedString, requiringSecureCoding: true) {
             sampleNote.content = data
         }
         modelContext.insert(sampleNote)

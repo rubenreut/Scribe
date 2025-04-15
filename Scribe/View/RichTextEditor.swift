@@ -1,6 +1,5 @@
 import SwiftUI
 import UIKit
-import Combine
 
 /// A SwiftUI wrapper around UITextView for rich text editing
 struct RichTextEditor: UIViewRepresentable {
@@ -37,9 +36,17 @@ struct RichTextEditor: UIViewRepresentable {
     }
     
     func updateUIView(_ textView: UITextView, context: Context) {
-        if textView.attributedText != attributedText {
-            // Only update if the text has changed to avoid cursor jumping
+        if textView.attributedText.string != attributedText.string {
+            // Save cursor position
+            let selectedRange = textView.selectedRange
+            
+            // Only update if content actually changed
             textView.attributedText = attributedText
+            
+            // Restore cursor position
+            if selectedRange.location < attributedText.length {
+                textView.selectedRange = selectedRange
+            }
         }
     }
     
@@ -172,54 +179,44 @@ struct RichTextToolbar: View {
         }
     }
     
+    // Helper method to toggle font traits
+    private func toggleFontTrait(trait: UIFontDescriptor.SymbolicTraits, isActive: Bool) {
+        guard let textView = textView, textView.selectedRange.length > 0 else { return }
+        
+        let selectedRange = textView.selectedRange
+        let mutableAttrText = NSMutableAttributedString(attributedString: attributedText)
+        
+        mutableAttrText.enumerateAttribute(.font, in: selectedRange, options: []) { (value, range, _) in
+            guard let currentFont = value as? UIFont else { return }
+            
+            var traits = currentFont.fontDescriptor.symbolicTraits
+            if isActive {
+                traits.insert(trait)
+            } else {
+                traits.remove(trait)
+            }
+            
+            if let descriptor = currentFont.fontDescriptor.withSymbolicTraits(traits) {
+                let newFont = UIFont(descriptor: descriptor, size: currentFont.pointSize)
+                mutableAttrText.addAttribute(.font, value: newFont, range: range)
+            }
+        }
+        
+        attributedText = mutableAttrText
+        textView.attributedText = mutableAttrText
+        textView.selectedRange = selectedRange
+    }
+    
     // Apply bold formatting
     private func toggleBold() {
         isBold.toggle()
-        
-        guard let textView = textView else { return }
-        let selectedRange = textView.selectedRange
-        
-        if selectedRange.length > 0 {
-            let mutableAttrText = NSMutableAttributedString(attributedString: attributedText)
-            let currentFont = mutableAttrText.attribute(.font, at: selectedRange.location, effectiveRange: nil) as? UIFont ?? UIFont.preferredFont(forTextStyle: .body)
-            
-            let newFont: UIFont
-            if isBold {
-                newFont = UIFont.boldSystemFont(ofSize: currentFont.pointSize)
-            } else {
-                newFont = UIFont.systemFont(ofSize: currentFont.pointSize)
-            }
-            
-            mutableAttrText.addAttribute(.font, value: newFont, range: selectedRange)
-            attributedText = mutableAttrText
-            textView.attributedText = mutableAttrText
-            textView.selectedRange = selectedRange
-        }
+        toggleFontTrait(trait: .traitBold, isActive: isBold)
     }
     
     // Apply italic formatting
     private func toggleItalic() {
         isItalic.toggle()
-        
-        guard let textView = textView else { return }
-        let selectedRange = textView.selectedRange
-        
-        if selectedRange.length > 0 {
-            let mutableAttrText = NSMutableAttributedString(attributedString: attributedText)
-            let currentFont = mutableAttrText.attribute(.font, at: selectedRange.location, effectiveRange: nil) as? UIFont ?? UIFont.preferredFont(forTextStyle: .body)
-            
-            let newFont: UIFont
-            if isItalic {
-                newFont = UIFont.italicSystemFont(ofSize: currentFont.pointSize)
-            } else {
-                newFont = UIFont.systemFont(ofSize: currentFont.pointSize)
-            }
-            
-            mutableAttrText.addAttribute(.font, value: newFont, range: selectedRange)
-            attributedText = mutableAttrText
-            textView.attributedText = mutableAttrText
-            textView.selectedRange = selectedRange
-        }
+        toggleFontTrait(trait: .traitItalic, isActive: isItalic)
     }
     
     // Apply underline formatting
@@ -284,7 +281,7 @@ struct RichTextToolbar: View {
         }
     }
     
-    // Apply bullet points
+    // Apply bullet points more efficiently using paragraph style
     private func applyBulletPoints() {
         guard let textView = textView else { return }
         let selectedRange = textView.selectedRange
@@ -292,31 +289,49 @@ struct RichTextToolbar: View {
         if selectedRange.length > 0 {
             let mutableAttrText = NSMutableAttributedString(attributedString: attributedText)
             let fullText = mutableAttrText.string
-            let selectedText = fullText.substring(with: Range(selectedRange, in: fullText)!)
             
-            // Split by new lines and add bullets
-            let lines = selectedText.split(separator: "\n")
+            // Get the paragraph ranges from the selection
+            let nsString = fullText as NSString
+            let paragraphRange = nsString.paragraphRange(for: selectedRange)
+            
+            // Create paragraph style with indentation
+            let paragraphStyle = NSMutableParagraphStyle()
+            paragraphStyle.headIndent = 15
+            paragraphStyle.firstLineHeadIndent = 0
+            paragraphStyle.paragraphSpacing = 4
+            
+            // Split the selected text into paragraphs and process each one
+            let selectedText = nsString.substring(with: paragraphRange)
+            let paragraphs = selectedText.components(separatedBy: "\n")
             var bulletedText = ""
+            var currentLocation = paragraphRange.location
             
-            for line in lines {
-                if !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    bulletedText += "• " + line + "\n"
-                } else {
-                    bulletedText += line + "\n"
+            for (index, paragraph) in paragraphs.enumerated() {
+                let trimmedParagraph = paragraph.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmedParagraph.isEmpty {
+                    let bulletedParagraph = "• " + paragraph
+                    bulletedText += bulletedParagraph
+                    if index < paragraphs.count - 1 || selectedText.hasSuffix("\n") {
+                        bulletedText += "\n"
+                    }
+                } else if index < paragraphs.count - 1 {
+                    bulletedText += "\n"
                 }
             }
             
-            // If there's a trailing newline in selectedText, remove it from bulletedText
-            if selectedText.hasSuffix("\n") && bulletedText.hasSuffix("\n\n") {
-                bulletedText.removeLast()
-            }
-            
-            let bulletedAttrString = NSAttributedString(string: bulletedText)
-            mutableAttrText.replaceCharacters(in: selectedRange, with: bulletedAttrString)
+            // Apply the formatted text with attributes
+            let bulletedAttrs: [NSAttributedString.Key: Any] = [
+                .paragraphStyle: paragraphStyle
+            ]
+            let bulletedAttrString = NSAttributedString(string: bulletedText, attributes: bulletedAttrs)
+            mutableAttrText.replaceCharacters(in: paragraphRange, with: bulletedAttrString)
             
             attributedText = mutableAttrText
             textView.attributedText = mutableAttrText
-            textView.selectedRange = NSRange(location: selectedRange.location, length: bulletedText.count)
+            
+            // Set cursor position at the end of the modified text
+            let newCursorPosition = paragraphRange.location + bulletedText.count
+            textView.selectedRange = NSRange(location: newCursorPosition, length: 0)
         }
     }
     
@@ -339,13 +354,3 @@ struct RichTextToolbar: View {
     }
 }
 
-/// Utility for creating default attributed strings
-struct AttributedStringHelper {
-    /// Creates a new attributed string with default attributes
-    static func createDefaultString(_ text: String = "") -> NSAttributedString {
-        let defaultAttributes: [NSAttributedString.Key: Any] = [
-            .font: UIFont.preferredFont(forTextStyle: .body)
-        ]
-        return NSAttributedString(string: text, attributes: defaultAttributes)
-    }
-}

@@ -33,7 +33,7 @@ import OSLog
             logger.error("Failed to save new note: \(error.localizedDescription)")
         }
         
-        logger.debug("Created new note")
+        // Note created successfully
     }
     
     /// Saves any pending changes to the notes
@@ -48,7 +48,7 @@ import OSLog
                 guard !Task.isCancelled else { return }
                 
                 try modelContext.save()
-                logger.debug("Successfully saved changes")
+                // Changes saved successfully
             } catch {
                 logger.error("Failed to save note: \(error.localizedDescription)")
             }
@@ -65,7 +65,7 @@ import OSLog
     /// Updates a note's content with NSAttributedString and marks it as modified
     func updateNoteContent(_ note: ScribeNote, newContent: NSAttributedString) {
         do {
-            note.content = try NSKeyedArchiver.archivedData(withRootObject: newContent, requiringSecureCoding: false)
+            note.content = try NSKeyedArchiver.archivedData(withRootObject: newContent, requiringSecureCoding: true)
             note.lastModified = Date()
             saveChanges()
         } catch {
@@ -104,7 +104,7 @@ import OSLog
         // Refresh notes to update the UI
         refreshNotes()
         
-        logger.debug("Deleted \(indexSet.count) notes")
+        // Notes deleted successfully
     }
     
     /// Refreshes the notes array from the model context
