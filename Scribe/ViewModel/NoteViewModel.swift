@@ -12,14 +12,17 @@ import OSLog
     var selectedNote: ScribeNote?
     var searchText: String = ""
     var notes: [ScribeNote] = []
+    var folders: [ScribeFolder] = []
     
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
         refreshNotes()
+        refreshFolders()
     }
     
     /// Creates a new note and selects it
     func createNewNote() {
+        // Create the note first
         let newNote = ScribeNote()
         
         // Add an empty attributed string with default body styling
@@ -37,21 +40,22 @@ import OSLog
             logger.error("Failed to initialize note with default styling: \(error.localizedDescription)")
         }
         
+        // Insert into context and save immediately
         modelContext.insert(newNote)
-        selectedNote = newNote
-        
-        // Refresh notes to ensure the new note appears in the list
-        refreshNotes()
         
         do {
+            // Save BEFORE refreshing notes or setting selected note
             try modelContext.save()
+            
+            // Now set as selected note
+            selectedNote = newNote
+            
+            // Refresh notes last, after save is complete
+            refreshNotes()
         } catch {
             logger.error("Failed to save new note: \(error.localizedDescription)")
         }
-        
-        // Note created successfully
     }
-    
     /// Saves any pending changes to the notes
     func saveChanges() {
         // Cancel any existing save task
@@ -98,11 +102,13 @@ import OSLog
         }
         
         do {
-            // Register necessary classes for secure coding
-            NSKeyedUnarchiver.setClass(NSTextAttachment.self, forClassName: "NSTextAttachment")
-            NSKeyedUnarchiver.setClass(UIImage.self, forClassName: "UIImage")
+            // Create a dedicated unarchiver instance for this operation
+            let unarchiver = try NSKeyedUnarchiver(forReadingFrom: note.content)
+            unarchiver.setClass(NSTextAttachment.self, forClassName: "NSTextAttachment")
+            unarchiver.setClass(UIImage.self, forClassName: "UIImage")
             
-            let content = try NSKeyedUnarchiver.unarchiveTopLevelObjectWithData(note.content) as? NSAttributedString
+            // Use the dedicated unarchiver instance
+            let content = unarchiver.decodeObject(of: NSAttributedString.self, forKey: NSKeyedArchiveRootObjectKey)
             return content ?? NSAttributedString(string: "")
         } catch {
             logger.error("Unarchiving error: \(error.localizedDescription)")
@@ -118,19 +124,18 @@ import OSLog
             
             // If the deleted note was selected, deselect it
             if selectedNote == noteToDelete {
-                selectedNote = nil
+                selectedNote = notes.indices.contains(index - 1) ? notes[index - 1] : nil
             }
         }
         
         // Save changes after deletion
         do {
             try modelContext.save()
+            refreshNotes() // Refresh notes to update UI
         } catch {
             logger.error("Failed to save after deletion: \(error.localizedDescription)")
         }
         
-        // Refresh notes to update the UI
-        refreshNotes()
         
         // Notes deleted successfully
     }
@@ -146,6 +151,17 @@ import OSLog
         }
     }
     
+    /// Refreshes the folders array from the model context
+    func refreshFolders() {
+        do {
+            let descriptor = FetchDescriptor<ScribeFolder>(sortBy: [SortDescriptor(\.name)])
+            folders = try modelContext.fetch(descriptor)
+        } catch {
+            logger.error("Failed to fetch folders: \(error.localizedDescription)")
+            folders = []
+        }
+    }
+    
     /// Returns filtered notes based on search text
     var filteredNotes: [ScribeNote] {
         if searchText.isEmpty {
@@ -158,7 +174,6 @@ import OSLog
             }
         }
     }
-    
 }
 
 // Extension to ensure NSAttributedString can be properly archived with attachments

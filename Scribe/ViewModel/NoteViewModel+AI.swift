@@ -6,19 +6,6 @@ import SwiftUI
 extension NoteViewModel {
     // MARK: - Folder Management
     
-    /// Available folders
-    var folders: [ScribeFolder] {
-        get {
-            do {
-                let descriptor = FetchDescriptor<ScribeFolder>(sortBy: [SortDescriptor(\.name)])
-                return try modelContext.fetch(descriptor)
-            } catch {
-                logger.error("Failed to fetch folders: \(error.localizedDescription)")
-                return []
-            }
-        }
-    }
-    
     /// Creates a new folder
     /// - Parameters:
     ///   - name: The name for the new folder
@@ -29,6 +16,7 @@ extension NoteViewModel {
         let newFolder = ScribeFolder(name: name, icon: icon, color: color)
         modelContext.insert(newFolder)
         saveChanges()
+        refreshFolders()
         return newFolder
     }
     
@@ -39,15 +27,21 @@ extension NoteViewModel {
     func assignNote(_ note: ScribeNote, toFolder folder: ScribeFolder) {
         note.folder = folder
         note.lastModified = Date()
+        folder.notes?.append(note)
         saveChanges()
+        refreshFolders()
     }
     
     /// Removes a note from its folder
     /// - Parameter note: The note to remove from folder
     func removeNoteFromFolder(_ note: ScribeNote) {
+        if let folder = note.folder, let index = folder.notes?.firstIndex(where: { $0 == note }) {
+            folder.notes?.remove(at: index)
+        }
         note.folder = nil
         note.lastModified = Date()
         saveChanges()
+        refreshFolders()
     }
     
     /// Deletes a folder and optionally its notes
@@ -77,6 +71,7 @@ extension NoteViewModel {
         
         // Refresh notes list
         refreshNotes()
+        refreshFolders()
         
         print("🗑️ Deleted folder: \(folder.name) (with notes: \(deleteNotes))")
     }
@@ -139,9 +134,10 @@ extension NoteViewModel {
             print("💾 Saving changes to model context...")
             try modelContext.save()
             
-            // Refresh notes
-            print("🔄 Refreshing notes list...")
+            // Refresh notes and folders
+            print("🔄 Refreshing notes and folders...")
             refreshNotes()
+            refreshFolders()
             return (true, nil)
         } catch {
             let errorMessage = "AI organization failed: \(error.localizedDescription)"

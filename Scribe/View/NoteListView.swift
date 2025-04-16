@@ -26,7 +26,7 @@ struct NoteListView: View {
             // Folders section (if any)
             if !viewModel.folders.isEmpty {
                 Section("Folders") {
-                    ForEach(viewModel.folders) { folder in
+                    ForEach(viewModel.folders, id: \.persistentModelID) { folder in
                         HStack {
                             Image(systemName: folder.icon)
                                 .foregroundColor(Color(folder.color))
@@ -52,7 +52,7 @@ struct NoteListView: View {
             
             // Notes section
             Section(header: Text(viewModel.folders.isEmpty ? "" : "Notes")) {
-                ForEach(notes) { note in
+                ForEach(notes, id: \.persistentModelID) { note in
                     NoteRowView(note: note, viewModel: viewModel)
                         .tag(note)
                         .contextMenu {
@@ -73,7 +73,7 @@ struct NoteListView: View {
                             } else {
                                 // Add folder options for unorganized notes
                                 Menu("Add to Folder") {
-                                    ForEach(viewModel.folders) { folder in
+                                    ForEach(viewModel.folders, id: \.persistentModelID) { folder in
                                         Button {
                                             viewModel.assignNote(note, toFolder: folder)
                                         } label: {
@@ -100,10 +100,6 @@ struct NoteListView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {
-                    Button(action: viewModel.createNewNote) {
-                        Label("New Note", systemImage: "square.and.pencil")
-                    }
-                    
                     Button {
                         Task {
                             isOrganizing = true
@@ -137,9 +133,7 @@ struct NoteListView: View {
             }
             
             ToolbarItem(placement: .navigationBarLeading) {
-                Button(action: viewModel.createNewNote) {
-                    Label("New", systemImage: "square.and.pencil")
-                }
+                // Button removed as requested
             }
         }
         .sheet(isPresented: $showSettings) {

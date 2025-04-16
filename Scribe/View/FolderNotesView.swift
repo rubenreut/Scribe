@@ -18,7 +18,7 @@ struct FolderNotesView: View {
                     }
                 } else {
                     List(selection: $selectedNote) {
-                        ForEach(folderNotes) { note in
+                        ForEach(folderNotes, id: \.persistentModelID) { note in
                             NoteRowView(note: note, viewModel: viewModel)
                                 .tag(note)
                                 .contextMenu {
@@ -61,12 +61,8 @@ struct FolderNotesView: View {
     }
 }
 
-// Helper extension to make ScribeNote identifiable by wrapper
-extension ScribeNote: Identifiable {
-    public var id: String {
-        return persistentModelID.storeIdentifier ?? UUID().uuidString
-    }
-}
+// We don't need a custom Identifiable implementation 
+// since we're using persistentModelID directly in ForEach
 
 #Preview {
     @MainActor func createPreview() -> some View {
