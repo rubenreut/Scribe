@@ -21,7 +21,7 @@ struct ContentView: View {
         do {
             // Use in-memory only container for initial setup
             let schema = Schema([ScribeNote.self, ScribeFolder.self])
-            let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+            let config = ModelConfiguration("PreviewConfig", schema: schema, isStoredInMemoryOnly: true, allowsSave: true)
             let container = try ModelContainer(for: schema, configurations: [config])
             _viewModel = State(initialValue: NoteViewModel(modelContext: ModelContext(container)))
         } catch {
@@ -29,8 +29,8 @@ struct ContentView: View {
             print("Warning: Using temporary container for initialization: \(error.localizedDescription)")
             
             // Create an empty model context if everything fails (will be replaced on appear)
-            let descriptor = ModelConfiguration(isStoredInMemoryOnly: true)
             let schema = Schema([ScribeNote.self, ScribeFolder.self])
+            let descriptor = ModelConfiguration("FallbackConfig", schema: schema, isStoredInMemoryOnly: true, allowsSave: true)
             let container = try! ModelContainer(for: schema, configurations: [descriptor])
             _viewModel = State(initialValue: NoteViewModel(modelContext: ModelContext(container)))
         }
@@ -99,7 +99,7 @@ struct ContentView: View {
 #Preview {
     @MainActor func createPreview() -> some View {
         let schema = Schema([ScribeNote.self, ScribeFolder.self])
-        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let config = ModelConfiguration("PreviewConfig", schema: schema, isStoredInMemoryOnly: true, allowsSave: true)
         let container = try! ModelContainer(for: schema, configurations: [config])
         
         // Add a sample note for the preview

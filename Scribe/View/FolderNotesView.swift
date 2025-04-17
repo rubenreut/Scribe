@@ -67,7 +67,7 @@ struct FolderNotesView: View {
     @MainActor func createPreview() -> some View {
         // Use the SwiftData preview container
         let schema = Schema([ScribeNote.self, ScribeFolder.self])
-        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let config = ModelConfiguration("FolderPreviewConfig", schema: schema, isStoredInMemoryOnly: true, allowsSave: true)
         let container = try! ModelContainer(for: schema, configurations: [config])
         let modelContext = container.mainContext
         let viewModel = NoteViewModel(modelContext: modelContext)

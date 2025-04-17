@@ -50,10 +50,15 @@ struct ScribeApp: App {
         do {
             // Set up the schema and configuration for CloudKit
             let schema = Schema([ScribeNote.self, ScribeFolder.self])
+            let storeURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+                .appending(path: "Scribe.store")
+                
+            // Use the exact parameter order expected by ModelConfiguration
             let configuration = ModelConfiguration(
+                "Scribe", // Configuration name as first parameter
                 schema: schema,
-                url: URL(filePath: NSPersistentContainer.defaultDirectoryURL().path(percentEncoded: false))
-                    .appending(path: "Scribe.store"),
+                url: storeURL,
+                allowsSave: true,
                 cloudKitContainerIdentifier: "iCloud.com.rubenreut.Scribe"
             )
             
