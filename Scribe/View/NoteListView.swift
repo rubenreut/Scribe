@@ -236,7 +236,9 @@ struct NoteRowView: View {
 
 #Preview {
     @MainActor func createPreview() -> some View {
-        let container = try! ModelContainer(for: ScribeNote.self, ScribeFolder.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let schema = Schema([ScribeNote.self, ScribeFolder.self])
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try! ModelContainer(for: schema, configurations: [config])
         let modelContext = container.mainContext
         let viewModel = NoteViewModel(modelContext: modelContext)
         

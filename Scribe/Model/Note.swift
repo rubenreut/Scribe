@@ -5,7 +5,7 @@ import UIKit
 import CloudKit
 
 /// Represents a folder for organizing notes
-@Model(cloudSync: true)
+@Model
 final class ScribeFolder {
     var name: String = "Untitled Folder"
     var icon: String = "folder"
@@ -34,7 +34,7 @@ final class ScribeFolder {
 }
 
 /// Represents a note in the Scribe application
-@Model(cloudSync: true)
+@Model
 final class ScribeNote {
     var title: String = "New Note"
     var content: Data = Data()

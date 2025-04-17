@@ -20,8 +20,9 @@ struct ContentView: View {
         // Initialize with an empty container that will be replaced when Environment is available
         do {
             // Use in-memory only container for initial setup
-            let config = ModelConfiguration(isStoredInMemoryOnly: true)
-            let container = try ModelContainer(for: ScribeNote.self, ScribeFolder.self, configurations: config)
+            let schema = Schema([ScribeNote.self, ScribeFolder.self])
+            let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+            let container = try ModelContainer(for: schema, configurations: [config])
             _viewModel = State(initialValue: NoteViewModel(modelContext: ModelContext(container)))
         } catch {
             // This should not happen but provide a fallback
@@ -29,7 +30,8 @@ struct ContentView: View {
             
             // Create an empty model context if everything fails (will be replaced on appear)
             let descriptor = ModelConfiguration(isStoredInMemoryOnly: true)
-            let container = try! ModelContainer(for: ScribeNote.self, ScribeFolder.self, configurations: descriptor)
+            let schema = Schema([ScribeNote.self, ScribeFolder.self])
+            let container = try! ModelContainer(for: schema, configurations: [descriptor])
             _viewModel = State(initialValue: NoteViewModel(modelContext: ModelContext(container)))
         }
     }
@@ -96,8 +98,9 @@ struct ContentView: View {
 
 #Preview {
     @MainActor func createPreview() -> some View {
-        let container = try! ModelContainer(for: ScribeNote.self, ScribeFolder.self, 
-                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let schema = Schema([ScribeNote.self, ScribeFolder.self])
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try! ModelContainer(for: schema, configurations: [config])
         
         // Add a sample note for the preview
         let context = ModelContext(container)

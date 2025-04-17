@@ -9,6 +9,7 @@ import SwiftUI
 import SwiftData
 import OSLog
 import Foundation
+import CloudKit
 
 /// Main application entry point
 @main
@@ -47,8 +48,17 @@ struct ScribeApp: App {
     /// Creates and configures the SwiftData model container with iCloud sync
     private func createModelContainer() -> ModelContainer {
         do {
-            // Create a container with cloud sync - pass models as separate arguments, not as an array
-            let container = try ModelContainer(for: ScribeNote.self, ScribeFolder.self)
+            // Set up the schema and configuration for CloudKit
+            let schema = Schema([ScribeNote.self, ScribeFolder.self])
+            let configuration = ModelConfiguration(
+                schema: schema,
+                url: URL(filePath: NSPersistentContainer.defaultDirectoryURL().path(percentEncoded: false))
+                    .appending(path: "Scribe.store"),
+                cloudKitContainerIdentifier: "iCloud.com.rubenreut.Scribe"
+            )
+            
+            // Create the container with the configuration
+            let container = try ModelContainer(for: schema, configurations: [configuration])
             logger.info("Successfully created model container with iCloud sync")
             return container
         } catch {
