@@ -45,8 +45,27 @@ struct ContentView: View {
                         }
                     }
                     
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        CloudSyncStatusView(status: viewModel.syncStatus)
+                    }
                     
                     // Rich text toggle button removed - always using rich text editor
+                }
+                
+                // Show iCloud status at the bottom of the list
+                if case .error(let message) = viewModel.syncStatus {
+                    VStack {
+                        Text("iCloud Sync Error")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                        Text(message)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom, 4)
+                    .frame(maxWidth: .infinity)
+                    .background(Color(.systemBackground))
                 }
             }
         } detail: {

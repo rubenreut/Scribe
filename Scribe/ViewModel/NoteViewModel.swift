@@ -2,22 +2,44 @@ import Foundation
 import SwiftData
 import SwiftUI
 import OSLog
+import CloudKit
+
+/// Enumeration of iCloud sync states for UI display
+enum SyncStatus {
+    case upToDate
+    case syncing
+    case error(String)
+}
 
 /// ViewModel for handling note operations
 @Observable @MainActor class NoteViewModel {
     let logger = Logger(subsystem: "com.rubenreut.Scribe", category: "NoteViewModel")
     let modelContext: ModelContext
     private var saveTask: Task<Void, Never>? = nil
+    private var cloudSubscription: Task<Void, Never>? = nil
     
     var selectedNote: ScribeNote?
     var searchText: String = ""
     var notes: [ScribeNote] = []
     var folders: [ScribeFolder] = []
+    var syncStatus: SyncStatus = .upToDate
     
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
         refreshNotes()
         refreshFolders()
+        setupCloudKitSubscription()
+    }
+    
+    deinit {
+        Task { @MainActor in
+            // Cancel any pending tasks
+            saveTask?.cancel()
+            cloudSubscription?.cancel()
+            
+            // Remove notification observers
+            NotificationCenter.default.removeObserver(self)
+        }
     }
     
     /// Creates a new note and selects it
@@ -171,6 +193,87 @@ import OSLog
                 let content = attributedContent(for: note).string
                 return note.title.localizedStandardContains(searchText) ||
                       content.localizedStandardContains(searchText)
+            }
+        }
+    }
+    
+    // MARK: - iCloud Sync
+    
+    /// Sets up subscription to CloudKit notifications to monitor sync status
+    private func setupCloudKitSubscription() {
+        // Cancel any existing subscription
+        cloudSubscription?.cancel()
+        
+        // Start a new background task to monitor CloudKit notifications
+        cloudSubscription = Task { 
+            do {
+                // Subscribe to various CloudKit notification types
+                let center = NotificationCenter.default
+                
+                // Add observers for CloudKit account status
+                center.addObserver(
+                    forName: NSNotification.Name.CKAccountChanged,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] _ in
+                    self?.handleCloudKitAccountChange()
+                }
+                
+                // Listen for CloudKit database changes
+                center.addObserver(
+                    forName: NSNotification.Name.CKDatabaseDidChangeNotification,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] _ in
+                    guard let self = self else { return }
+                    logger.info("CloudKit database changed")
+                    syncStatus = .syncing
+                    
+                    // Refresh after a short delay to allow changes to propagate
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(2))
+                        refreshNotes()
+                        refreshFolders()
+                        syncStatus = .upToDate
+                    }
+                }
+            } catch {
+                logger.error("CloudKit subscription error: \(error.localizedDescription)")
+                syncStatus = .error(error.localizedDescription)
+            }
+        }
+    }
+    
+    /// Handles changes to the CloudKit account
+    private func handleCloudKitAccountChange() {
+        // Check iCloud account status
+        CKContainer.default().accountStatus { [weak self] status, error in
+            guard let self = self else { return }
+            
+            Task { @MainActor in
+                switch status {
+                case .available:
+                    self.logger.info("iCloud account is available")
+                    self.syncStatus = .upToDate
+                    
+                case .restricted:
+                    self.logger.warning("iCloud account is restricted")
+                    self.syncStatus = .error("iCloud access is restricted")
+                    
+                case .noAccount:
+                    self.logger.warning("No iCloud account is signed in")
+                    self.syncStatus = .error("No iCloud account is available")
+                    
+                case .couldNotDetermine:
+                    if let error = error {
+                        self.logger.error("Could not determine iCloud account status: \(error.localizedDescription)")
+                        self.syncStatus = .error("Could not connect to iCloud")
+                    }
+                    
+                @unknown default:
+                    self.logger.warning("Unknown iCloud account status")
+                    self.syncStatus = .error("Unknown iCloud status")
+                }
             }
         }
     }

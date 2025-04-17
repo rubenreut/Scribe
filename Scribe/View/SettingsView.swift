@@ -1,4 +1,5 @@
 import SwiftUI
+import CloudKit
 
 struct SettingsView: View {
     @AppStorage("aiProvider") private var aiProvider = "OpenAI"
@@ -8,6 +9,8 @@ struct SettingsView: View {
     @State private var alertMessage = ""
     @State private var isTesting = false
     @State private var testResponse = ""
+    @State private var iCloudStatus: SyncStatus = .upToDate
+    @State private var isCheckingiCloud = false
     @Environment(\.dismiss) private var dismiss
     
     var body: some View {
@@ -53,8 +56,28 @@ struct SettingsView: View {
                     }
                 }
                 
+                Section(header: Text("iCloud Sync")) {
+                    HStack {
+                        Text("iCloud Sync")
+                        Spacer()
+                        CloudSyncStatusView(status: getiCloudStatus())
+                    }
+                    
+                    Text("Your notes will be synced across all your devices signed in with the same iCloud account.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    Button("Check iCloud Status") {
+                        checkiCloudStatus()
+                    }
+                }
+                
                 Section(header: Text("About")) {
                     Text("AI features require an API key from your chosen provider.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    Text("Your notes are securely stored in iCloud and will be preserved even if you delete the app.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -63,7 +86,10 @@ struct SettingsView: View {
             .navigationBarItems(trailing: Button("Done") {
                 dismiss()
             })
-            .onAppear(perform: loadAPIKey)
+            .onAppear {
+                loadAPIKey()
+                checkiCloudStatus()
+            }
             .alert(isPresented: $showAlert) {
                 Alert(
                     title: Text("API Key"),
@@ -133,6 +159,64 @@ struct SettingsView: View {
                 isSaving = false
                 showAlert = true
                 alertMessage = success ? "API key saved successfully" : "Failed to save API key"
+            }
+        }
+    }
+    
+    // MARK: - iCloud Status
+    
+    /// Returns the current iCloud sync status
+    private func getiCloudStatus() -> SyncStatus {
+        return iCloudStatus
+    }
+    
+    /// Checks the current iCloud account status
+    private func checkiCloudStatus() {
+        isCheckingiCloud = true
+        iCloudStatus = .syncing
+        
+        Task {
+            // Check if iCloud is available
+            await checkCloudKitAvailability()
+            isCheckingiCloud = false
+        }
+    }
+    
+    /// Checks if CloudKit is available for the current user
+    private func checkCloudKitAvailability() async {
+        do {
+            // Check account status
+            return await withCheckedContinuation { continuation in
+                CKContainer.default().accountStatus { status, error in
+                    Task { @MainActor in
+                        switch status {
+                        case .available:
+                            self.iCloudStatus = .upToDate
+                            
+                        case .noAccount:
+                            self.iCloudStatus = .error("No iCloud account found")
+                            
+                        case .restricted:
+                            self.iCloudStatus = .error("iCloud access is restricted")
+                            
+                        case .couldNotDetermine:
+                            if let error = error {
+                                self.iCloudStatus = .error(error.localizedDescription)
+                            } else {
+                                self.iCloudStatus = .error("Could not determine iCloud status")
+                            }
+                            
+                        @unknown default:
+                            self.iCloudStatus = .error("Unknown iCloud status")
+                        }
+                        
+                        continuation.resume()
+                    }
+                }
+            }
+        } catch {
+            await MainActor.run {
+                iCloudStatus = .error(error.localizedDescription)
             }
         }
     }
