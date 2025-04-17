@@ -18,7 +18,7 @@ struct FolderNotesView: View {
                     }
                 } else {
                     List(selection: $selectedNote) {
-                        ForEach(folderNotes, id: \.persistentModelID) { note in
+                        ForEach(folderNotes, id: \.self) { note in
                             NoteRowView(note: note, viewModel: viewModel)
                                 .tag(note)
                                 .contextMenu {
@@ -61,8 +61,7 @@ struct FolderNotesView: View {
     }
 }
 
-// We don't need a custom Identifiable implementation 
-// since we're using persistentModelID directly in ForEach
+// No need for a custom Identifiable implementation since we're using \.self for identification
 
 #Preview {
     @MainActor func createPreview() -> some View {

@@ -80,7 +80,7 @@ extension NoteViewModel {
     /// - Parameter folder: The folder to get notes for
     /// - Returns: Array of notes in the folder
     func notesInFolder(_ folder: ScribeFolder) -> [ScribeNote] {
-        return notes.filter { $0.folder?.persistentModelID == folder.persistentModelID }
+        return notes.filter { $0.folder == folder }
     }
     
     // MARK: - AI Organization

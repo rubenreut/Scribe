@@ -60,6 +60,7 @@ final class ScribeNote {
 
 extension ScribeNote: Equatable {
     static func == (lhs: ScribeNote, rhs: ScribeNote) -> Bool {
-        lhs.persistentModelID == rhs.persistentModelID
+        // Use createdAt and title as a unique identifier since persistentModelID is not available
+        lhs.createdAt == rhs.createdAt && lhs.title == rhs.title
     }
 }
