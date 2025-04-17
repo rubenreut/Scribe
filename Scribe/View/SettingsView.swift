@@ -184,39 +184,33 @@ struct SettingsView: View {
     
     /// Checks if CloudKit is available for the current user
     private func checkCloudKitAvailability() async {
-        do {
-            // Check account status
-            return await withCheckedContinuation { continuation in
-                CKContainer.default().accountStatus { status, error in
-                    Task { @MainActor in
-                        switch status {
-                        case .available:
-                            self.iCloudStatus = .upToDate
-                            
-                        case .noAccount:
-                            self.iCloudStatus = .error("No iCloud account found")
-                            
-                        case .restricted:
-                            self.iCloudStatus = .error("iCloud access is restricted")
-                            
-                        case .couldNotDetermine:
-                            if let error = error {
-                                self.iCloudStatus = .error(error.localizedDescription)
-                            } else {
-                                self.iCloudStatus = .error("Could not determine iCloud status")
-                            }
-                            
-                        @unknown default:
-                            self.iCloudStatus = .error("Unknown iCloud status")
+        // Check account status
+        await withCheckedContinuation { continuation in
+            CKContainer.default().accountStatus { status, error in
+                Task { @MainActor in
+                    switch status {
+                    case .available:
+                        self.iCloudStatus = .upToDate
+                        
+                    case .noAccount:
+                        self.iCloudStatus = .error("No iCloud account found")
+                        
+                    case .restricted:
+                        self.iCloudStatus = .error("iCloud access is restricted")
+                        
+                    case .couldNotDetermine:
+                        if let error = error {
+                            self.iCloudStatus = .error(error.localizedDescription)
+                        } else {
+                            self.iCloudStatus = .error("Could not determine iCloud status")
                         }
                         
-                        continuation.resume()
+                    @unknown default:
+                        self.iCloudStatus = .error("Unknown iCloud status")
                     }
+                    
+                    continuation.resume()
                 }
-            }
-        } catch {
-            await MainActor.run {
-                iCloudStatus = .error(error.localizedDescription)
             }
         }
     }
