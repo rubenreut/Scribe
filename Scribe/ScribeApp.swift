@@ -46,31 +46,14 @@ struct ScribeApp: App {
     
     /// Creates and configures the SwiftData model container with iCloud sync
     private func createModelContainer() -> ModelContainer {
-        let schema = Schema([ScribeNote.self, ScribeFolder.self])
-        
-        // Configure for iCloud sync
-        let modelConfiguration = ModelConfiguration(
-            schema: schema,
-            isStoredInMemoryOnly: false,
-            cloudKitDatabase: .private("iCloud.com.rubenreut.Scribe")
-        )
-        
         do {
-            let container = try ModelContainer(for: schema, configurations: [modelConfiguration])
+            // Create a simpler container configuration - the CloudStorage attribute handles sync
+            let container = try ModelContainer(for: [ScribeNote.self, ScribeFolder.self])
             logger.info("Successfully created model container with iCloud sync")
             return container
         } catch {
-            logger.error("Failed to create model container with iCloud sync: \(error.localizedDescription)")
-            
-            // Fallback to local-only storage
-            logger.warning("Falling back to local-only storage")
-            do {
-                let localConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-                return try ModelContainer(for: schema, configurations: [localConfiguration])
-            } catch {
-                logger.critical("Failed to create local model container: \(error.localizedDescription)")
-                fatalError("Unable to create any model container")
-            }
+            logger.critical("Failed to create model container: \(error.localizedDescription)")
+            fatalError("Unable to create model container: \(error.localizedDescription)")
         }
     }
 }

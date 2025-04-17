@@ -17,12 +17,21 @@ struct ContentView: View {
     private let useRichText: Bool = true
     
     init() {
-        // This will be properly initialized when the @Environment is available
+        // Initialize with an empty container that will be replaced when Environment is available
         do {
-            let container = try ModelContainer(for: ScribeNote.self)
+            // Use in-memory only container for initial setup
+            let config = ModelConfiguration(isStoredInMemoryOnly: true)
+            let container = try ModelContainer(for: [ScribeNote.self, ScribeFolder.self], configurations: [config])
             _viewModel = State(initialValue: NoteViewModel(modelContext: ModelContext(container)))
         } catch {
-            fatalError("Failed to create model container: \(error.localizedDescription)")
+            // This should not happen but provide a fallback
+            print("Warning: Using temporary container for initialization: \(error.localizedDescription)")
+            
+            // Create an empty model context if everything fails (will be replaced on appear)
+            let descriptor = ModelConfiguration(isStoredInMemoryOnly: true)
+            let schema = Schema([ScribeNote.self, ScribeFolder.self])
+            let container = try! ModelContainer(for: schema, configurations: [descriptor])
+            _viewModel = State(initialValue: NoteViewModel(modelContext: ModelContext(container)))
         }
     }
     
@@ -88,7 +97,20 @@ struct ContentView: View {
 
 #Preview {
     @MainActor func createPreview() -> some View {
-        let container = try! ModelContainer(for: ScribeNote.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let container = try! ModelContainer(for: [ScribeNote.self, ScribeFolder.self], 
+                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        
+        // Add a sample note for the preview
+        let context = ModelContext(container)
+        let sampleNote = ScribeNote(title: "Sample Note")
+        
+        // Create a basic attributed string
+        let sampleText = NSAttributedString(string: "This is sample content for the preview")
+        if let data = try? NSKeyedArchiver.archivedData(withRootObject: sampleText, requiringSecureCoding: true) {
+            sampleNote.content = data
+        }
+        
+        context.insert(sampleNote)
         
         return ContentView()
             .modelContainer(container)

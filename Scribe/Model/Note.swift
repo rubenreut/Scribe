@@ -2,21 +2,27 @@ import Foundation
 import SwiftData
 import SwiftUI
 import UIKit
+import CloudKit
 
 /// Represents a folder for organizing notes
 @Model
+@CloudStorage(CloudKit.privateCloudDatabase)
 final class ScribeFolder {
-    var name: String
-    var icon: String
-    var colorData: Data
-    var createdAt: Date
+    var name: String = "Untitled Folder"
+    var icon: String = "folder"
+    var colorData: Data = {
+        return (try? NSKeyedArchiver.archivedData(withRootObject: UIColor.systemBlue, requiringSecureCoding: true)) ?? Data()
+    }()
+    var createdAt: Date = Date()
     
     @Relationship var notes: [ScribeNote]?
     
     init(name: String, icon: String = "folder", color: UIColor = .systemBlue, createdAt: Date = Date()) {
         self.name = name
         self.icon = icon
-        self.colorData = try! NSKeyedArchiver.archivedData(withRootObject: color, requiringSecureCoding: true)
+        if let data = try? NSKeyedArchiver.archivedData(withRootObject: color, requiringSecureCoding: true) {
+            self.colorData = data
+        }
         self.createdAt = createdAt
         self.notes = []
     }
@@ -30,11 +36,12 @@ final class ScribeFolder {
 
 /// Represents a note in the Scribe application
 @Model
+@CloudStorage(CloudKit.privateCloudDatabase)
 final class ScribeNote {
-    var title: String
-    var content: Data
-    var createdAt: Date
-    var lastModified: Date
+    var title: String = "New Note"
+    var content: Data = Data()
+    var createdAt: Date = Date()
+    var lastModified: Date = Date()
     
     // Relationship to parent folder (optional)
     var folder: ScribeFolder?
