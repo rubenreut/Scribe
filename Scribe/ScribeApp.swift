@@ -53,14 +53,15 @@ struct ScribeApp: App {
             let storeURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
                 .appending(path: "Scribe.store")
                 
-            // Use the exact parameter order expected by ModelConfiguration
+            // Use only the supported parameters for ModelConfiguration
             let configuration = ModelConfiguration(
                 "Scribe", // Configuration name as first parameter
                 schema: schema,
                 url: storeURL,
-                allowsSave: true,
-                cloudKitContainerIdentifier: "iCloud.com.rubenreut.Scribe"
+                allowsSave: true
             )
+            
+            // Configure CloudKit in entitlements instead
             
             // Create the container with the configuration
             let container = try ModelContainer(for: schema, configurations: [configuration])
