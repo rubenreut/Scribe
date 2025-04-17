@@ -21,7 +21,7 @@ struct ContentView: View {
         do {
             // Use in-memory only container for initial setup
             let config = ModelConfiguration(isStoredInMemoryOnly: true)
-            let container = try ModelContainer(for: [ScribeNote.self, ScribeFolder.self], configurations: [config])
+            let container = try ModelContainer(for: ScribeNote.self, ScribeFolder.self, configurations: config)
             _viewModel = State(initialValue: NoteViewModel(modelContext: ModelContext(container)))
         } catch {
             // This should not happen but provide a fallback
@@ -29,8 +29,7 @@ struct ContentView: View {
             
             // Create an empty model context if everything fails (will be replaced on appear)
             let descriptor = ModelConfiguration(isStoredInMemoryOnly: true)
-            let schema = Schema([ScribeNote.self, ScribeFolder.self])
-            let container = try! ModelContainer(for: schema, configurations: [descriptor])
+            let container = try! ModelContainer(for: ScribeNote.self, ScribeFolder.self, configurations: descriptor)
             _viewModel = State(initialValue: NoteViewModel(modelContext: ModelContext(container)))
         }
     }
@@ -97,7 +96,7 @@ struct ContentView: View {
 
 #Preview {
     @MainActor func createPreview() -> some View {
-        let container = try! ModelContainer(for: [ScribeNote.self, ScribeFolder.self], 
+        let container = try! ModelContainer(for: ScribeNote.self, ScribeFolder.self, 
                                            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         
         // Add a sample note for the preview

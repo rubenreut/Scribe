@@ -47,8 +47,8 @@ struct ScribeApp: App {
     /// Creates and configures the SwiftData model container with iCloud sync
     private func createModelContainer() -> ModelContainer {
         do {
-            // Create a simpler container configuration - the CloudStorage attribute handles sync
-            let container = try ModelContainer(for: [ScribeNote.self, ScribeFolder.self])
+            // Create a container with cloud sync - pass models as separate arguments, not as an array
+            let container = try ModelContainer(for: ScribeNote.self, ScribeFolder.self)
             logger.info("Successfully created model container with iCloud sync")
             return container
         } catch {
