@@ -4,54 +4,59 @@ import SwiftUI
 import OSLog
 import CloudKit
 
-/// Enumeration of iCloud sync states for UI display
-enum SyncStatus: Equatable {
-    case upToDate
-    case syncing
-    case error(String)
-    
-    static func == (lhs: SyncStatus, rhs: SyncStatus) -> Bool {
-        switch (lhs, rhs) {
-        case (.upToDate, .upToDate):
-            return true
-        case (.syncing, .syncing):
-            return true
-        case (.error(let lhsMessage), .error(let rhsMessage)):
-            return lhsMessage == rhsMessage
-        default:
-            return false
-        }
-    }
-}
-
 /// ViewModel for handling note operations
 @Observable @MainActor class NoteViewModel {
-    let logger = Logger(subsystem: "com.rubenreut.Scribe", category: "NoteViewModel")
+    let logger = Logger(subsystem: Constants.App.bundleID, category: "NoteViewModel")
     let modelContext: ModelContext
     private var saveTask: Task<Void, Never>? = nil
-    private var cloudSubscription: Task<Void, Never>? = nil
+    
+    // Sync manager for handling iCloud sync
+    private let syncManager: SyncManager
     
     var selectedNote: ScribeNote?
     var searchText: String = ""
     var notes: [ScribeNote] = []
     var folders: [ScribeFolder] = []
-    var syncStatus: SyncStatus = .upToDate
+    
+    // Expose sync status from sync manager 
+    var syncStatus: SyncStatus {
+        syncManager.syncStatus
+    }
     
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
+        self.syncManager = SyncManager(modelContext: modelContext)
+        
         refreshNotes()
         refreshFolders()
-        setupCloudKitSubscription()
+        
+        // Listen for sync status changes from SyncManager
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSyncStatusChange(_:)),
+            name: Notification.Name.syncStatusDidChange,
+            object: nil
+        )
     }
     
     deinit {
         Task { @MainActor in
             // Cancel any pending tasks
             saveTask?.cancel()
-            cloudSubscription?.cancel()
             
             // Remove notification observers
             NotificationCenter.default.removeObserver(self)
+        }
+    }
+    
+    /// Handle sync status change notifications
+    @objc private func handleSyncStatusChange(_ notification: Notification) {
+        // If we receive a sync status update notification, refresh our data
+        if let newStatus = notification.object as? SyncStatus,
+           case .upToDate = newStatus {
+            // Only refresh when the status indicates data is up to date
+            refreshNotes()
+            refreshFolders()
         }
     }
     
@@ -206,132 +211,6 @@ enum SyncStatus: Equatable {
                 let content = attributedContent(for: note).string
                 return note.title.localizedStandardContains(searchText) ||
                       content.localizedStandardContains(searchText)
-            }
-        }
-    }
-    
-    // MARK: - iCloud Sync
-    
-    /// Sets up subscription to CloudKit notifications to monitor sync status
-    private func setupCloudKitSubscription() {
-        // Cancel any existing subscription
-        cloudSubscription?.cancel()
-        
-        // Start a new background task to monitor CloudKit notifications
-        cloudSubscription = Task { 
-            // Subscribe to various CloudKit notification types
-            let center = NotificationCenter.default
-            
-            // Add observers for CloudKit account status
-            center.addObserver(
-                forName: NSNotification.Name.CKAccountChanged,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                self?.handleCloudKitAccountChange()
-            }
-            
-            // Set up periodic refresh to ensure sync
-            await periodicCloudSyncCheck()
-        }
-    }
-    
-    /// Periodically checks and refreshes data to ensure sync
-    private func periodicCloudSyncCheck() async {
-        while !Task.isCancelled {
-            do {
-                // Check iCloud status every 30 seconds
-                try await Task.sleep(for: .seconds(30))
-                
-                // Skip if already syncing
-                if case .syncing = syncStatus { continue }
-                
-                // Check account status
-                await handleCloudKitAccountChangeAsync()
-                
-                // If account is available, refresh data
-                if case .upToDate = syncStatus {
-                    logger.info("Periodic cloud sync check - refreshing data")
-                    refreshNotes()
-                    refreshFolders()
-                }
-            } catch {
-                // Task cancelled or other error
-                break
-            }
-        }
-    }
-    
-    /// Handles changes to the CloudKit account
-    private func handleCloudKitAccountChange() {
-        // Check iCloud account status
-        CKContainer.default().accountStatus { [weak self] status, error in
-            guard let self = self else { return }
-            
-            Task { @MainActor in
-                switch status {
-                case .available:
-                    self.logger.info("iCloud account is available")
-                    self.syncStatus = .upToDate
-                    
-                case .restricted:
-                    self.logger.warning("iCloud account is restricted")
-                    self.syncStatus = .error("iCloud access is restricted")
-                    
-                case .noAccount:
-                    self.logger.warning("No iCloud account is signed in")
-                    self.syncStatus = .error("No iCloud account is available")
-                    
-                case .couldNotDetermine:
-                    if let error = error {
-                        self.logger.error("Could not determine iCloud account status: \(error.localizedDescription)")
-                        self.syncStatus = .error("Could not connect to iCloud")
-                    }
-                    
-                @unknown default:
-                    self.logger.warning("Unknown iCloud account status")
-                    self.syncStatus = .error("Unknown iCloud status")
-                }
-            }
-        }
-    }
-    
-    /// Async version of handleCloudKitAccountChange that can be awaited
-    private func handleCloudKitAccountChangeAsync() async {
-        return await withCheckedContinuation { continuation in
-            CKContainer.default().accountStatus { [weak self] status, error in
-                guard let self = self else {
-                    continuation.resume()
-                    return
-                }
-                
-                Task { @MainActor in
-                    switch status {
-                    case .available:
-                        self.logger.info("iCloud account is available")
-                        self.syncStatus = .upToDate
-                        
-                    case .restricted:
-                        self.logger.warning("iCloud account is restricted")
-                        self.syncStatus = .error("iCloud access is restricted")
-                        
-                    case .noAccount:
-                        self.logger.warning("No iCloud account is signed in")
-                        self.syncStatus = .error("No iCloud account is available")
-                        
-                    case .couldNotDetermine:
-                        if let error = error {
-                            self.logger.error("Could not determine iCloud account status: \(error.localizedDescription)")
-                            self.syncStatus = .error("Could not connect to iCloud")
-                        }
-                        
-                    @unknown default:
-                        self.logger.warning("Unknown iCloud account status")
-                        self.syncStatus = .error("Unknown iCloud status")
-                    }
-                    
-                    continuation.resume()
-                }
             }
         }
     }

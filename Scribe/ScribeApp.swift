@@ -1,10 +1,3 @@
-//
-//  ScribeApp.swift
-//  Scribe
-//
-//  Created by Ruben Reut on 14/04/2025.
-//
-
 import SwiftUI
 import SwiftData
 import OSLog
@@ -14,7 +7,7 @@ import CloudKit
 /// Main application entry point
 @main
 struct ScribeApp: App {
-    private let logger = Logger(subsystem: "com.rubenreut.Scribe", category: "Application")
+    private let logger = Logger(subsystem: Constants.App.bundleID, category: "Application")
     
     init() {
         configureLogger()
@@ -30,7 +23,7 @@ struct ScribeApp: App {
             // Add app-specific commands
             CommandGroup(after: .newItem) {
                 Button("New Note") {
-                    NotificationCenter.default.post(name: Constants.NotificationNames.createNewNote, object: nil)
+                    NotificationCenter.default.post(name: AppNotification.createNewNote.name, object: nil)
                 }
                 .keyboardShortcut("n", modifiers: [.command])
             }
@@ -50,8 +43,10 @@ struct ScribeApp: App {
         do {
             // Set up the schema and configuration for CloudKit
             let schema = Schema([ScribeNote.self, ScribeFolder.self])
-            let storeURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-                .appending(path: "Scribe.store")
+            guard let baseURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+                throw AppError.dataError(description: "Could not access Application Support directory")
+            }
+            let storeURL = baseURL.appending(path: "Scribe.store")
                 
             // Use only the supported parameters for ModelConfiguration
             let configuration = ModelConfiguration(

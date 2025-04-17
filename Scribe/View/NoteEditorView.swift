@@ -1,7 +1,6 @@
 import SwiftUI
 import SwiftData
 import OSLog
-// Import view extensions
 import UIKit
 
 /// View for editing a single note
@@ -105,24 +104,17 @@ struct NoteEditorView: View {
 }
 
 #Preview {
-    @MainActor func createPreview() -> some View {
-        let container = try! ModelContainer(for: ScribeNote.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    PreviewContainer { container in
         let modelContext = container.mainContext
         let viewModel = NoteViewModel(modelContext: modelContext)
         
-        // Create an attributed string
-        let attributedString = NSAttributedString(string: "This is sample content")
-        
-        // Create sample note with archived attributed string
-        let sampleNote = ScribeNote(title: "Sample Note")
-        if let data = try? NSKeyedArchiver.archivedData(withRootObject: attributedString, requiringSecureCoding: true) {
-            sampleNote.content = data
-        }
-        modelContext.insert(sampleNote)
+        // Create sample note with attributed string
+        let sampleNote = PreviewHelpers.createSampleNote(
+            title: "Sample Note",
+            content: "This is sample content",
+            in: modelContext
+        )
         
         return NoteEditorView(note: .constant(sampleNote), viewModel: viewModel)
-            .modelContainer(container)
     }
-    
-    return createPreview()
 }

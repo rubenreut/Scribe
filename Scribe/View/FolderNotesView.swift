@@ -44,7 +44,11 @@ struct FolderNotesView: View {
                 }
             }
             .sheet(item: $selectedNote) { note in
-                RichTextNoteEditorView(selectedNote: .constant(note), viewModel: viewModel)
+                let binding = Binding<ScribeNote?>(
+                    get: { note },
+                    set: { _ in }
+                )
+                RichTextNoteEditorView(selectedNote: binding, viewModel: viewModel)
             }
         }
     }
@@ -56,7 +60,7 @@ struct FolderNotesView: View {
     
     // Refresh function to update the view when notes change
     private func refreshNotes() {
-        // Force view refresh
+        
         viewModel.refreshNotes()
     }
 }
@@ -64,33 +68,21 @@ struct FolderNotesView: View {
 // No need for a custom Identifiable implementation since we're using \.self for identification
 
 #Preview {
-    @MainActor func createPreview() -> some View {
-        // Use the SwiftData preview container
-        let schema = Schema([ScribeNote.self, ScribeFolder.self])
-        let config = ModelConfiguration("FolderPreviewConfig", schema: schema, isStoredInMemoryOnly: true, allowsSave: true)
-        let container = try! ModelContainer(for: schema, configurations: [config])
-        let modelContext = container.mainContext
-        let viewModel = NoteViewModel(modelContext: modelContext)
+    PreviewContainer { container in
+        let context = container.mainContext
+        let viewModel = NoteViewModel(modelContext: context)
         
-        // Create a folder and some notes
-        let folder = ScribeFolder(name: "Sample Folder")
-        modelContext.insert(folder)
+        // Create a sample folder with notes
+        let folder = PreviewHelpers.createSampleFolder(
+            name: "Sample Folder",
+            noteCount: 3,
+            in: context
+        )
         
-        // Create notes with archived attributed strings
-        let attributedString = NSAttributedString(string: "This is sample content")
-        
-        for i in 1...3 {
-            let note = ScribeNote(title: "Sample Note \(i)")
-            if let data = try? NSKeyedArchiver.archivedData(withRootObject: attributedString, requiringSecureCoding: true) {
-                note.content = data
-            }
-            note.folder = folder
-            modelContext.insert(note)
-        }
+        // Force a refresh of view model data
+        viewModel.refreshNotes()
+        viewModel.refreshFolders()
         
         return FolderNotesView(folder: folder, viewModel: viewModel)
-            .modelContainer(container)
     }
-    
-    return createPreview()
 }

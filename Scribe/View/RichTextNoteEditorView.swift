@@ -25,7 +25,25 @@ struct RichTextNoteEditorView: View {
         selectedNote?.persistentModelID.storeIdentifier ?? "no-note"
     }
     
-    private let logger = Logger(subsystem: "com.rubenreut.Scribe", category: "RichTextNoteEditorView")
+    private let logger = Logger(subsystem: Constants.App.bundleID, category: "RichTextNoteEditorView")
+    
+    /// Prepare note content for sharing
+    func noteContentForSharing() -> String {
+        guard let note = selectedNote else { return "" }
+        return note.title.isEmpty ? attributedText.string : "\(note.title)\n\n\(attributedText.string)"
+    }
+    
+    // Formatting engine for handling format operations
+    private var formattingEngine: FormattingEngine? {
+        if let textView = textViewHolder.textView {
+            return FormattingEngine(
+                textView: textView,
+                attributedText: attributedText,
+                formattingState: formattingState
+            )
+        }
+        return nil
+    }
     
     var body: some View {
         Group {
@@ -207,308 +225,40 @@ struct RichTextNoteEditorView: View {
         }
     }
     
-    // Using View extension for keyboard dismissal
-    
     /// Handle formatting actions from the format menu
     func handleFormatAction(_ action: FormatMenu.FormatAction, for note: ScribeNote) {
-        // Get the text view and coordinator directly
-        guard let textView = textViewHolder.textView,
-              let coordinator = textView.delegate as? RichTextEditor.Coordinator else {
-            return
-        }
-        
-        // Create a mutable copy of the current text
-        let mutableAttrText = NSMutableAttributedString(attributedString: attributedText)
-        let selectedRange = textView.selectedRange
+        // Use the formatting engine to perform the requested action
+        var newText: NSAttributedString? = nil
         
         switch action {
         case .bold:
-            self.formattingState.isBold.toggle()
-            
-            // Handle selection vs insertion point differently
-            if selectedRange.length > 0 {
-                // Apply to selected text
-                mutableAttrText.enumerateAttribute(.font, in: selectedRange) { [self] value, range, _ in
-                    let currentFont = value as? UIFont ?? UIFont.preferredFont(forTextStyle: .body)
-                    var traits = currentFont.fontDescriptor.symbolicTraits
-                    
-                    if self.formattingState.isBold {
-                        traits.insert(.traitBold)
-                    } else {
-                        traits.remove(.traitBold)
-                    }
-                    
-                    if let descriptor = currentFont.fontDescriptor.withSymbolicTraits(traits) {
-                        let newFont = UIFont(descriptor: descriptor, size: currentFont.pointSize)
-                        mutableAttrText.addAttribute(.font, value: newFont, range: range)
-                    }
-                }
-                
-                // Update text view
-                textView.attributedText = mutableAttrText
-                attributedText = mutableAttrText
-                textView.selectedRange = selectedRange
-                viewModel.updateNoteContent(note, newContent: mutableAttrText)
-            } else {
-                // Update typing attributes for future text
-                var currentAttributes = textView.typingAttributes
-                let currentFont = currentAttributes[.font] as? UIFont ?? UIFont.preferredFont(forTextStyle: .body)
-                var traits = currentFont.fontDescriptor.symbolicTraits
-                
-                if self.formattingState.isBold {
-                    traits.insert(.traitBold)
-                } else {
-                    traits.remove(.traitBold)
-                }
-                
-                if let descriptor = currentFont.fontDescriptor.withSymbolicTraits(traits) {
-                    let newFont = UIFont(descriptor: descriptor, size: currentFont.pointSize)
-                    currentAttributes[.font] = newFont
-                    textView.typingAttributes = currentAttributes
-                }
-            }
-            
+            newText = formattingEngine?.toggleBold()
         case .italic:
-            self.formattingState.isItalic.toggle()
-            
-            // Similar implementation to bold but for italic
-            if selectedRange.length > 0 {
-                mutableAttrText.enumerateAttribute(.font, in: selectedRange) { [self] value, range, _ in
-                    let currentFont = value as? UIFont ?? UIFont.preferredFont(forTextStyle: .body)
-                    var traits = currentFont.fontDescriptor.symbolicTraits
-                    
-                    if self.formattingState.isItalic {
-                        traits.insert(.traitItalic)
-                    } else {
-                        traits.remove(.traitItalic)
-                    }
-                    
-                    if let descriptor = currentFont.fontDescriptor.withSymbolicTraits(traits) {
-                        let newFont = UIFont(descriptor: descriptor, size: currentFont.pointSize)
-                        mutableAttrText.addAttribute(.font, value: newFont, range: range)
-                    }
-                }
-                
-                textView.attributedText = mutableAttrText
-                attributedText = mutableAttrText
-                textView.selectedRange = selectedRange
-                viewModel.updateNoteContent(note, newContent: mutableAttrText)
-            } else {
-                var currentAttributes = textView.typingAttributes
-                let currentFont = currentAttributes[.font] as? UIFont ?? UIFont.preferredFont(forTextStyle: .body)
-                var traits = currentFont.fontDescriptor.symbolicTraits
-                
-                if self.formattingState.isItalic {
-                    traits.insert(.traitItalic)
-                } else {
-                    traits.remove(.traitItalic)
-                }
-                
-                if let descriptor = currentFont.fontDescriptor.withSymbolicTraits(traits) {
-                    let newFont = UIFont(descriptor: descriptor, size: currentFont.pointSize)
-                    currentAttributes[.font] = newFont
-                    textView.typingAttributes = currentAttributes
-                }
-            }
-            
+            newText = formattingEngine?.toggleItalic()
         case .underline:
-            self.formattingState.isUnderlined.toggle()
-            
-            if selectedRange.length > 0 {
-                if self.formattingState.isUnderlined {
-                    mutableAttrText.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: selectedRange)
-                } else {
-                    mutableAttrText.removeAttribute(.underlineStyle, range: selectedRange)
-                }
-                
-                textView.attributedText = mutableAttrText
-                attributedText = mutableAttrText
-                textView.selectedRange = selectedRange
-                viewModel.updateNoteContent(note, newContent: mutableAttrText)
-            } else {
-                var currentAttributes = textView.typingAttributes
-                
-                if self.formattingState.isUnderlined {
-                    currentAttributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
-                } else {
-                    currentAttributes.removeValue(forKey: .underlineStyle)
-                }
-                
-                textView.typingAttributes = currentAttributes
-            }
-            
+            newText = formattingEngine?.toggleUnderline()
         case .heading(let style):
-            // Determine font size based on heading style
-            let fontSize: CGFloat
-            switch style {
-            case .title: fontSize = 24
-            case .headline: fontSize = 18
-            default: fontSize = 16
-            }
-            
-            let fontWeight = style == .body ? UIFont.Weight.regular : UIFont.Weight.bold
-            let newFont = UIFont.systemFont(ofSize: fontSize, weight: fontWeight)
-            
-            if selectedRange.length > 0 {
-                mutableAttrText.addAttribute(.font, value: newFont, range: selectedRange)
-                textView.attributedText = mutableAttrText
-                attributedText = mutableAttrText
-                textView.selectedRange = selectedRange
-                viewModel.updateNoteContent(note, newContent: mutableAttrText)
-            } else {
-                var currentAttributes = textView.typingAttributes
-                currentAttributes[.font] = newFont
-                textView.typingAttributes = currentAttributes
-                
-                // Update toolbar state for this font size/style
-                self.formattingState.isBold = fontWeight == .bold
-            }
-            
+            newText = formattingEngine?.applyHeading(style)
         case .textColor:
-            // Show color picker if not already visible
-            if !self.showColorPicker {
-                self.showColorPicker = true
+            if !showColorPicker {
+                showColorPicker = true
+                return
             } else {
-                // Apply color to selection or typing attributes
-                let uiColor = UIColor(self.formattingState.textColor)
-                
-                if selectedRange.length > 0 {
-                    mutableAttrText.addAttribute(.foregroundColor, value: uiColor, range: selectedRange)
-                    textView.attributedText = mutableAttrText
-                    attributedText = mutableAttrText
-                    textView.selectedRange = selectedRange
-                    viewModel.updateNoteContent(note, newContent: mutableAttrText)
-                } else {
-                    var currentAttributes = textView.typingAttributes
-                    currentAttributes[.foregroundColor] = uiColor
-                    textView.typingAttributes = currentAttributes
-                }
+                newText = formattingEngine?.applyTextColor()
             }
-            
         case .bulletList:
-            // Direct implementation of bullet points function
-            if selectedRange.length > 0 {
-                // Process selected text paragraphs for bullets
-                let fullText = mutableAttrText.string
-                let nsString = fullText as NSString
-                let paragraphRange = nsString.paragraphRange(for: selectedRange)
-                
-                // Prepare paragraph style
-                let paragraphStyle = NSMutableParagraphStyle()
-                paragraphStyle.headIndent = 15
-                paragraphStyle.firstLineHeadIndent = 0
-                
-                // Process paragraphs
-                let selectedText = nsString.substring(with: paragraphRange)
-                let paragraphs = selectedText.components(separatedBy: "\n")
-                var bulletedText = ""
-                
-                for (index, paragraph) in paragraphs.enumerated() {
-                    let trimmedParagraph = paragraph.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmedParagraph.isEmpty {
-                        let bulletedParagraph = "• " + paragraph
-                        bulletedText += bulletedParagraph
-                        if index < paragraphs.count - 1 || selectedText.hasSuffix("\n") {
-                            bulletedText += "\n"
-                        }
-                    } else if index < paragraphs.count - 1 {
-                        bulletedText += "\n"
-                    }
-                }
-                
-                // Create attributed string with bullets
-                let bulletedAttrString = NSMutableAttributedString(string: bulletedText)
-                bulletedAttrString.addAttribute(.paragraphStyle, value: paragraphStyle, range: NSRange(location: 0, length: bulletedText.count))
-                
-                // Replace the original text
-                mutableAttrText.replaceCharacters(in: paragraphRange, with: bulletedAttrString)
-                textView.attributedText = mutableAttrText
-                attributedText = mutableAttrText
-                
-                // Position cursor at end of bulleted text
-                let newPosition = paragraphRange.location + bulletedText.count
-                textView.selectedRange = NSRange(location: newPosition, length: 0)
-                
-                viewModel.updateNoteContent(note, newContent: mutableAttrText)
-            } else {
-                // Insert bullet at cursor position
-                let bulletText = "• "
-                let bulletAttrString = NSAttributedString(string: bulletText)
-                
-                mutableAttrText.insert(bulletAttrString, at: selectedRange.location)
-                textView.attributedText = mutableAttrText
-                attributedText = mutableAttrText
-                textView.selectedRange = NSRange(location: selectedRange.location + bulletText.count, length: 0)
-                
-                viewModel.updateNoteContent(note, newContent: mutableAttrText)
-            }
-            
+            newText = formattingEngine?.applyBulletPoints()
         case .clearFormatting:
-            // Reset formatting state
-            self.formattingState.isBold = false
-            self.formattingState.isItalic = false
-            self.formattingState.isUnderlined = false
-            self.formattingState.textColor = .primary
+            newText = formattingEngine?.clearFormatting()
+        }
+        
+        // If text was modified, update the note
+        if let updatedText = newText {
+            // Update the view's attribute text binding
+            attributedText = updatedText
             
-            if selectedRange.length > 0 {
-                // Clear formatting on selected text
-                let plainText = mutableAttrText.string.substring(with: Range(selectedRange, in: mutableAttrText.string)!)
-                
-                // Default attributes
-                let defaultFont = UIFont.preferredFont(forTextStyle: .body)
-                let defaultAttributes: [NSAttributedString.Key: Any] = [
-                    .font: defaultFont,
-                    .foregroundColor: UIColor.label
-                ]
-                
-                let plainAttrString = NSAttributedString(string: plainText, attributes: defaultAttributes)
-                mutableAttrText.replaceCharacters(in: selectedRange, with: plainAttrString)
-                
-                textView.attributedText = mutableAttrText
-                attributedText = mutableAttrText
-                textView.selectedRange = NSRange(location: selectedRange.location, length: plainText.count)
-                
-                viewModel.updateNoteContent(note, newContent: mutableAttrText)
-            } else {
-                // Reset typing attributes
-                let defaultFont = UIFont.preferredFont(forTextStyle: .body)
-                let defaultAttributes: [NSAttributedString.Key: Any] = [
-                    .font: defaultFont,
-                    .foregroundColor: UIColor.label
-                ]
-                textView.typingAttributes = defaultAttributes
-            }
+            // Update the note in the view model
+            viewModel.updateNoteContent(note, newContent: updatedText)
         }
     }
-}
-
-// Observable class to hold the text view reference
-class RichTextViewHolder: ObservableObject {
-    static let shared = RichTextViewHolder()
-    @Published var textView: UITextView?
-    
-    private init() {}
-}
-
-#Preview {
-    @MainActor func createPreview() -> some View {
-        let container = try! ModelContainer(for: ScribeNote.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
-        let modelContext = container.mainContext
-        let viewModel = NoteViewModel(modelContext: modelContext)
-        
-        // Create an attributed string
-        let attributedString = NSAttributedString(string: "This is sample content")
-        
-        // Create sample note with archived attributed string
-        let sampleNote = ScribeNote(title: "Rich Text Sample")
-        if let data = try? NSKeyedArchiver.archivedData(withRootObject: attributedString, requiringSecureCoding: true) {
-            sampleNote.content = data
-        }
-        modelContext.insert(sampleNote)
-        
-        return RichTextNoteEditorView(selectedNote: .constant(sampleNote), viewModel: viewModel)
-            .modelContainer(container)
-    }
-    
-    return createPreview()
 }

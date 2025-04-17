@@ -101,16 +101,11 @@ struct CreateFolderView: View {
     }
 }
 
-struct CreateFolderView_Previews: PreviewProvider {
-    static var previews: some View {
-        @MainActor func createPreview() -> some View {
-            let container = try! ModelContainer(for: ScribeNote.self, ScribeFolder.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
-            let modelContext = container.mainContext
-            let viewModel = NoteViewModel(modelContext: modelContext)
-            
-            return CreateFolderView(viewModel: viewModel)
-        }
+#Preview {
+    PreviewContainer { container in
+        let context = container.mainContext
+        let viewModel = NoteViewModel(modelContext: context)
         
-        return createPreview()
+        return CreateFolderView(viewModel: viewModel)
     }
 }

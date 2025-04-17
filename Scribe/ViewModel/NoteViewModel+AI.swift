@@ -73,7 +73,7 @@ extension NoteViewModel {
         refreshNotes()
         refreshFolders()
         
-        print("🗑️ Deleted folder: \(folder.name) (with notes: \(deleteNotes))")
+        logger.info("Deleted folder: \(folder.name) (with notes: \(deleteNotes))")
     }
     
     /// Gets all notes that belong to a specific folder
@@ -101,12 +101,12 @@ extension NoteViewModel {
         }
         
         do {
-            print("🔍 Organizing \(notesToOrganize.count) notes with AI...")
+            logger.info("Organizing \(notesToOrganize.count) notes with AI...")
             let aiService = AIService(apiKey: apiKey)
             
             // Attempt the API call
             let organizations = try await aiService.organizeNotes(notesToOrganize, existingFolders: folders)
-            print("✅ Received organization suggestions: \(organizations.count)")
+            logger.info("Received organization suggestions: \(organizations.count)")
             
             // Validate we got results
             guard !organizations.isEmpty else {
@@ -115,34 +115,33 @@ extension NoteViewModel {
             
             // Apply the organizations
             for organization in organizations {
-                print("📂 Organizing note: '\(organization.note.title)' → '\(organization.folderName)'")
+                logger.debug("Organizing note: '\(organization.note.title)' → '\(organization.folderName)'")
                 if organization.isNewFolder {
                     // Create new folder
                     let newFolder = ScribeFolder(name: organization.folderName)
                     modelContext.insert(newFolder)
                     organization.note.folder = newFolder
-                    print("   Created new folder: \(organization.folderName)")
+                    logger.debug("Created new folder: \(organization.folderName)")
                 } else if let existingFolder = folders.first(where: { $0.name == organization.folderName }) {
                     // Use existing folder
                     organization.note.folder = existingFolder
-                    print("   Used existing folder: \(organization.folderName)")
+                    logger.debug("Used existing folder: \(organization.folderName)")
                 }
                 organization.note.lastModified = Date()
             }
             
             // Save changes
-            print("💾 Saving changes to model context...")
+            logger.debug("Saving changes to model context...")
             try modelContext.save()
             
             // Refresh notes and folders
-            print("🔄 Refreshing notes and folders...")
+            logger.debug("Refreshing notes and folders...")
             refreshNotes()
             refreshFolders()
             return (true, nil)
         } catch {
             let errorMessage = "AI organization failed: \(error.localizedDescription)"
             logger.error("\(errorMessage)")
-            print("❌ \(errorMessage)")
             return (false, errorMessage)
         }
     }
@@ -167,10 +166,10 @@ extension NoteViewModel {
         }
         
         do {
-            print("🔍 Formatting note with AI: \(note.title)")
+            logger.info("Formatting note with AI: \(note.title)")
             let aiService = AIService(apiKey: apiKey)
             let formattedContent = try await aiService.formatNoteContent(currentContent)
-            print("✅ Received formatting instructions: \(formattedContent.instructions.count)")
+            logger.info("Received formatting instructions: \(formattedContent.instructions.count)")
             
             // Verify we got formatting instructions
             guard !formattedContent.instructions.isEmpty else {
@@ -178,14 +177,13 @@ extension NoteViewModel {
             }
             
             // Apply the formatting
-            print("🖌 Applying formatting to note...")
+            logger.debug("Applying formatting to note...")
             let formattedAttributedText = applyFormatting(formattedContent)
             updateNoteContent(note, newContent: formattedAttributedText)
             return (true, nil)
         } catch {
             let errorMessage = "AI formatting failed: \(error.localizedDescription)"
             logger.error("\(errorMessage)")
-            print("❌ \(errorMessage)")
             return (false, errorMessage)
         }
     }

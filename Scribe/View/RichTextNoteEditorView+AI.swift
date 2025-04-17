@@ -71,12 +71,8 @@ extension RichTextNoteEditorView {
             )
             
             // Share button
-            Button(action: {
-                if let note = selectedNote {
-                    let content = note.title.isEmpty ? attributedText.string : "\(note.title)\n\n\(attributedText.string)"
-                    print("Would share: \(content)")
-                }
-            }) {
+            ShareLink(item: selectedNote != nil ? noteContentForSharing() : "") {
+
                 Image(systemName: "square.and.arrow.up")
                     .font(.system(size: 17, weight: .semibold))
                     .frame(width: 34, height: 34)

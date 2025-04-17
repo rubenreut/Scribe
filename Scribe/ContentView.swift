@@ -1,20 +1,12 @@
-//
-//  ContentView.swift
-//  Scribe
-//
-//  Created by Ruben Reut on 14/04/2025.
-//
-
 import SwiftUI
 import SwiftData
-import Foundation
+import OSLog
 
 /// Main content view showing split navigation between note list and editor
 struct ContentView: View {
+    private let logger = Logger(subsystem: Constants.App.bundleID, category: "ContentView")
     @Environment(\.modelContext) private var modelContext
     @State private var viewModel: NoteViewModel
-    // Always use rich text - remove toggle functionality
-    private let useRichText: Bool = true
     
     init() {
         // Initialize with an empty container that will be replaced when Environment is available
@@ -26,13 +18,26 @@ struct ContentView: View {
             _viewModel = State(initialValue: NoteViewModel(modelContext: ModelContext(container)))
         } catch {
             // This should not happen but provide a fallback
-            print("Warning: Using temporary container for initialization: \(error.localizedDescription)")
+            logger.warning("Using temporary container for initialization: \(error.localizedDescription)")
             
-            // Create an empty model context if everything fails (will be replaced on appear)
+            // Create an empty model context as fallback (will be replaced on appear)
             let schema = Schema([ScribeNote.self, ScribeFolder.self])
             let descriptor = ModelConfiguration("FallbackConfig", schema: schema, isStoredInMemoryOnly: true, allowsSave: true)
-            let container = try! ModelContainer(for: schema, configurations: [descriptor])
-            _viewModel = State(initialValue: NoteViewModel(modelContext: ModelContext(container)))
+            do {
+                let container = try ModelContainer(for: schema, configurations: [descriptor])
+                _viewModel = State(initialValue: NoteViewModel(modelContext: ModelContext(container)))
+            } catch {
+                // Last resort fallback - should never happen but prevents crash if it does
+                logger.error("Critical error creating fallback container: \(error)")
+                do {
+                    let emptyContainer = try ModelContainer(for: schema)
+                    let emptyContext = ModelContext(emptyContainer)
+                    _viewModel = State(initialValue: NoteViewModel(modelContext: emptyContext))
+                } catch {
+                    logger.critical("Fatal error initializing model container: \(error)")
+                    fatalError("Unable to initialize model container: \(error)")
+                }
+            }
         }
     }
     
@@ -90,7 +95,7 @@ struct ContentView: View {
             // Refresh notes on appear to ensure we have the latest data
             viewModel.refreshNotes()
         }
-        .onReceive(NotificationCenter.default.publisher(for: Constants.NotificationNames.createNewNote)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: AppNotification.createNewNote.name)) { _ in
             viewModel.createNewNote()
         }
     }
@@ -98,24 +103,46 @@ struct ContentView: View {
 
 #Preview {
     @MainActor func createPreview() -> some View {
+        // Create preview container with in-memory storage
         let schema = Schema([ScribeNote.self, ScribeFolder.self])
         let config = ModelConfiguration("PreviewConfig", schema: schema, isStoredInMemoryOnly: true, allowsSave: true)
-        let container = try! ModelContainer(for: schema, configurations: [config])
         
-        // Add a sample note for the preview
-        let context = ModelContext(container)
-        let sampleNote = ScribeNote(title: "Sample Note")
-        
-        // Create a basic attributed string
-        let sampleText = NSAttributedString(string: "This is sample content for the preview")
-        if let data = try? NSKeyedArchiver.archivedData(withRootObject: sampleText, requiringSecureCoding: true) {
-            sampleNote.content = data
+        do {
+            let container = try ModelContainer(for: schema, configurations: [config])
+            
+            // Add a sample note for the preview
+            let context = ModelContext(container)
+            let sampleNote = ScribeNote(title: "Sample Note")
+            
+            // Create a basic attributed string
+            let sampleText = NSAttributedString(string: "This is sample content for the preview")
+            if let data = try? NSKeyedArchiver.archivedData(withRootObject: sampleText, requiringSecureCoding: true) {
+                sampleNote.content = data
+            }
+            
+            context.insert(sampleNote)
+            
+            return ContentView()
+                .modelContainer(container)
+        } catch {
+            // Show an error view if container creation fails
+            do {
+                // Create a simple fallback container
+                let fallbackContainer = try ModelContainer(for: schema)
+                return ContentView()
+                    .modelContainer(fallbackContainer)
+                    .overlay(
+                        Text("Preview Error: \(error.localizedDescription)")
+                            .foregroundColor(.red)
+                            .padding()
+                    )
+            } catch {
+                // Last resort error view with no container
+                return Text("Preview Initialization Failed: \(error.localizedDescription)")
+                    .foregroundColor(.red)
+                    .padding()
+            }
         }
-        
-        context.insert(sampleNote)
-        
-        return ContentView()
-            .modelContainer(container)
     }
     
     return createPreview()

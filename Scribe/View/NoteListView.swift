@@ -132,9 +132,6 @@ struct NoteListView: View {
                 }
             }
             
-            ToolbarItem(placement: .navigationBarLeading) {
-                // Button removed as requested
-            }
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()
@@ -235,31 +232,43 @@ struct NoteRowView: View {
 }
 
 #Preview {
-    @MainActor func createPreview() -> some View {
-        let schema = Schema([ScribeNote.self, ScribeFolder.self])
-        let config = ModelConfiguration("NoteListPreviewConfig", schema: schema, isStoredInMemoryOnly: true, allowsSave: true)
-        let container = try! ModelContainer(for: schema, configurations: [config])
-        let modelContext = container.mainContext
-        let viewModel = NoteViewModel(modelContext: modelContext)
+    PreviewContainer { container in
+        let context = container.mainContext
+        let viewModel = NoteViewModel(modelContext: context)
         
-        // Create an attributed string
-        let attributedString = NSAttributedString(string: "This is sample content")
-        
-        // Create sample note with archived attributed string
-        let sampleNote = ScribeNote(title: "Sample Note")
-        if let data = try? NSKeyedArchiver.archivedData(withRootObject: attributedString, requiringSecureCoding: true) {
-            sampleNote.content = data
+        // Create some sample notes
+        for i in 1...5 {
+            // Create the note
+            let note = PreviewHelpers.createSampleNote(
+                title: "Sample Note \(i)",
+                content: "Content for note \(i)",
+                in: context
+            )
+            
+            // Make some notes part of folders
+            if i % 2 == 0 {
+                if let folder = viewModel.folders.first(where: { $0.name == "Sample Folder" }) {
+                    note.folder = folder
+                } else {
+                    let folder = PreviewHelpers.createSampleFolder(
+                        name: "Sample Folder",
+                        noteCount: 0,
+                        in: context
+                    )
+                    note.folder = folder
+                }
+            }
         }
-        modelContext.insert(sampleNote)
+        
+        // Force refresh of view model data
+        viewModel.refreshNotes()
+        viewModel.refreshFolders()
         
         return NoteListView(
-            notes: [sampleNote],
-            selectedNote: .constant(sampleNote),
+            notes: viewModel.notes,
+            selectedNote: .constant(viewModel.notes.first),
             onDelete: { _ in },
             viewModel: viewModel
         )
-        .modelContainer(container)
     }
-    
-    return createPreview()
 }

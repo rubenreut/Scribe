@@ -1,9 +1,11 @@
 import Foundation
 import SwiftUI
+import OSLog
 
 class AIService {
     private let apiKey: String
     private let baseURL: URL
+    private let logger = Logger(subsystem: Constants.App.bundleID, category: "AIService")
     
     enum AIProvider: String {
         case openAI = "OpenAI"
@@ -57,7 +59,7 @@ class AIService {
                 content = (try NSKeyedUnarchiver.unarchiveTopLevelObjectWithData(note.content) as? NSAttributedString)?.string ?? ""
             } catch {
                 content = "Error retrieving content"
-                print("Failed to unarchive note content: \(error)")
+                logger.error("Failed to unarchive note content: \(error)")
             }
             
             let safeContent = content.prefix(100)
@@ -86,36 +88,22 @@ class AIService {
         ]
         """
         
-        // Print prompt for debugging
-        print("AI Organization Prompt: \(prompt)")
+        logger.debug("AI Organization Prompt: \(prompt)")
         
         return prompt
     }
     
     private func parseOrganizationResponse(_ response: String, notes: [ScribeNote]) throws -> [NoteOrganization] {
-        // Parse JSON response into NoteOrganization structs
-        print("API Response to parse: \(response)")
-        
-        guard let jsonData = response.data(using: .utf8) else {
-            print("Failed to convert response to data")
-            throw AIServiceError.invalidResponseFormat
-        }
-        
-        // Try to extract JSON array if the response contains extra text
-        if let startIndex = response.firstIndex(of: "["), 
-           let endIndex = response.lastIndex(of: "]"), 
-           startIndex < endIndex {
-            let jsonSubstring = response[startIndex...endIndex]
-            let cleanJsonData = Data(jsonSubstring.utf8)
-            
-            do {
-                let decoder = JSONDecoder()
-                let organizationResults = try decoder.decode([NoteOrganizationResult].self, from: cleanJsonData)
+        return try parseJSONResponse(
+            response: response,
+            notes: notes,
+            decoder: { data in
+                let organizationResults = try JSONDecoder().decode([NoteOrganizationResult].self, from: data)
                 
-                print("Successfully decoded \(organizationResults.count) organization results")
+                logger.debug("Successfully decoded \(organizationResults.count) organization results")
                 return organizationResults.compactMap { result in
                     guard result.noteIndex >= 0, result.noteIndex < notes.count else { 
-                        print("Invalid note index: \(result.noteIndex)")
+                        logger.warning("Invalid note index: \(result.noteIndex)")
                         return nil 
                     }
                     return NoteOrganization(
@@ -124,60 +112,8 @@ class AIService {
                         isNewFolder: result.isNewFolder
                     )
                 }
-            } catch {
-                print("Failed to decode extracted JSON: \(error)")
-                // Fallback to original parsing if substring extraction fails
             }
-        }
-        
-        // Attempt standard parsing
-        do {
-            let decoder = JSONDecoder()
-            let organizationResults = try decoder.decode([NoteOrganizationResult].self, from: jsonData)
-            
-            print("Successfully decoded \(organizationResults.count) organization results")
-            return organizationResults.compactMap { result in
-                guard result.noteIndex >= 0, result.noteIndex < notes.count else { 
-                    print("Invalid note index: \(result.noteIndex)")
-                    return nil 
-                }
-                return NoteOrganization(
-                    note: notes[result.noteIndex], 
-                    folderName: result.folderName, 
-                    isNewFolder: result.isNewFolder
-                )
-            }
-        } catch {
-            print("JSON Parsing error: \(error)")
-            
-            // Try to extract JSON as a string from response if it might be mixed with other content
-            if let jsonStart = response.range(of: "```json"), 
-               let jsonEnd = response.range(of: "```", range: jsonStart.upperBound..<response.endIndex) {
-                let jsonSubstring = response[jsonStart.upperBound..<jsonEnd.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
-                
-                print("Found code block with possible JSON: \(jsonSubstring)")
-                if let jsonData = jsonSubstring.data(using: .utf8) {
-                    do {
-                        let decoder = JSONDecoder()
-                        let organizationResults = try decoder.decode([NoteOrganizationResult].self, from: jsonData)
-                        
-                        print("Successfully decoded JSON from code block")
-                        return organizationResults.compactMap { result in
-                            guard result.noteIndex >= 0, result.noteIndex < notes.count else { return nil }
-                            return NoteOrganization(
-                                note: notes[result.noteIndex], 
-                                folderName: result.folderName, 
-                                isNewFolder: result.isNewFolder
-                            )
-                        }
-                    } catch {
-                        print("Failed to decode JSON from code block: \(error)")
-                    }
-                }
-            }
-            
-            throw AIServiceError.invalidResponseFormat
-        }
+        )
     }
     
     // MARK: - API Testing
@@ -199,7 +135,7 @@ class AIService {
     }
     
     private func createFormattingPrompt(_ content: String) -> String {
-        return """
+        let prompt = """
         Format the following note content with appropriate headings, subheadings, and bullet points. 
         Do not change the actual content - only add formatting.
         Respond with a JSON object containing format instructions.
@@ -216,29 +152,52 @@ class AIService {
           ]
         }
         """
+        
+        logger.debug("AI Formatting Prompt created")
+        return prompt
     }
     
     private func parseFormattingResponse(_ response: String, originalContent: String) throws -> FormattedContent {
-        // Parse JSON response into formatting instructions
         guard let jsonData = response.data(using: .utf8) else {
+            logger.error("Failed to convert response to data")
             throw AIServiceError.invalidResponseFormat
         }
         
-        let decoder = JSONDecoder()
-        return try decoder.decode(FormattedContent.self, from: jsonData)
+        do {
+            let decoder = JSONDecoder()
+            let formattedContent = try decoder.decode(FormattedContent.self, from: jsonData)
+            logger.debug("Successfully parsed formatting response with \(formattedContent.instructions.count) instructions")
+            return formattedContent
+        } catch {
+            logger.error("Failed to parse formatting response: \(error)")
+            
+            // Try to extract JSON if the response has markdown code blocks
+            if let extractedJSON = tryExtractJSONFromMarkdown(response) {
+                do {
+                    let decoder = JSONDecoder()
+                    let formattedContent = try decoder.decode(FormattedContent.self, from: extractedJSON)
+                    logger.debug("Successfully parsed formatting from extracted JSON")
+                    return formattedContent
+                } catch {
+                    logger.error("Failed to parse extracted JSON: \(error)")
+                }
+            }
+            
+            throw AIServiceError.invalidResponseFormat
+        }
     }
     
     // MARK: - API Request
     
     private func sendRequest(prompt: String) async throws -> String {
-        var request = URLRequest(url: baseURL)
+        var request = URLRequest(url: self.baseURL)
         request.httpMethod = "POST"
-        request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.addValue("Bearer \(self.apiKey)", forHTTPHeaderField: "Authorization")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         
-        // Print debug info but mask the API key
-        print("📡 Sending request to: \(baseURL)")
-        print("🔑 Using API key: \(String(apiKey.prefix(3)))...\(String(apiKey.suffix(3)))")
+        // Log debug info but mask the API key
+        let maskedKey = "\(String(self.apiKey.prefix(3)))...\(String(self.apiKey.suffix(3)))"
+        logger.debug("Sending request to: \(self.baseURL) with API key: \(maskedKey)")
         
         let requestBody: [String: Any] = [
             "model": "gpt-4",
@@ -252,44 +211,110 @@ class AIService {
         request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
         
         do {
-            print("⏳ Waiting for API response...")
+            logger.debug("Waiting for API response...")
             let (data, response) = try await URLSession.shared.data(for: request)
             
             guard let httpResponse = response as? HTTPURLResponse else {
-                print("❌ Invalid HTTP response")
+                logger.error("Invalid HTTP response")
                 throw AIServiceError.networkError
             }
             
-            print("📥 Received response with status code: \(httpResponse.statusCode)")
+            logger.debug("Received response with status code: \(httpResponse.statusCode)")
             
             guard httpResponse.statusCode == 200 else {
                 let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
-                print("⚠️ API error (\(httpResponse.statusCode)): \(errorBody)")
+                logger.error("API error (\(httpResponse.statusCode)): \(errorBody)")
                 throw AIServiceError.apiError(statusCode: httpResponse.statusCode, message: errorBody)
             }
             
-            do {
-                let responseDict = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-                let choices = responseDict?["choices"] as? [[String: Any]]
-                let firstChoice = choices?.first
-                let message = firstChoice?["message"] as? [String: Any]
-                
-                guard let content = message?["content"] as? String else {
-                    print("❌ Invalid response format: \(String(data: data, encoding: .utf8) ?? "<unreadable data>")")
-                    throw AIServiceError.invalidResponseFormat
-                }
-                
-                print("✅ Successfully parsed API response")
-                return content
-            } catch {
-                print("❌ JSON parsing error: \(error)")
-                print("📄 Response data: \(String(data: data, encoding: .utf8) ?? "<unreadable data>")")
-                throw AIServiceError.invalidResponseFormat
-            }
+            return try extractContentFromResponse(data)
         } catch {
-            print("❌ Network or parsing error: \(error)")
+            logger.error("Network or parsing error: \(error)")
             throw error
         }
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func extractContentFromResponse(_ data: Data) throws -> String {
+        do {
+            let responseDict = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let choices = responseDict?["choices"] as? [[String: Any]]
+            let firstChoice = choices?.first
+            let message = firstChoice?["message"] as? [String: Any]
+            
+            guard let content = message?["content"] as? String else {
+                logger.error("Invalid response format")
+                throw AIServiceError.invalidResponseFormat
+            }
+            
+            logger.debug("Successfully parsed API response")
+            return content
+        } catch {
+            logger.error("JSON parsing error: \(error)")
+            logger.debug("Response data: \(String(data: data, encoding: .utf8) ?? "<unreadable data>")")
+            throw AIServiceError.invalidResponseFormat
+        }
+    }
+    
+    private func tryExtractJSONFromMarkdown(_ text: String) -> Data? {
+        // Try to extract JSON from markdown code blocks
+        if let jsonStart = text.range(of: "```json"), 
+           let jsonEnd = text.range(of: "```", range: jsonStart.upperBound..<text.endIndex) {
+            let jsonSubstring = text[jsonStart.upperBound..<jsonEnd.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+            logger.debug("Found code block with possible JSON")
+            return jsonSubstring.data(using: .utf8)
+        }
+        
+        // Try to extract JSON array directly
+        if let startIndex = text.firstIndex(of: "["), 
+           let endIndex = text.lastIndex(of: "]"), 
+           startIndex < endIndex {
+            let jsonSubstring = text[startIndex...endIndex]
+            logger.debug("Found JSON array directly in text")
+            return Data(jsonSubstring.utf8)
+        }
+        
+        // Try to extract JSON object directly
+        if let startIndex = text.firstIndex(of: "{"), 
+           let endIndex = text.lastIndex(of: "}"), 
+           startIndex < endIndex {
+            let jsonSubstring = text[startIndex...endIndex]
+            logger.debug("Found JSON object directly in text")
+            return Data(jsonSubstring.utf8)
+        }
+        
+        return nil
+    }
+    
+    private func parseJSONResponse<T>(
+        response: String,
+        notes: [ScribeNote],
+        decoder: (Data) throws -> T
+    ) throws -> T {
+        logger.debug("Parsing JSON response")
+        
+        // First try parsing the full response as JSON
+        if let jsonData = response.data(using: .utf8) {
+            do {
+                return try decoder(jsonData)
+            } catch {
+                logger.debug("Could not parse full response as JSON: \(error)")
+                // Continue to other extraction methods
+            }
+        }
+        
+        // Try to extract JSON from the response if it's embedded in text
+        if let extractedData = tryExtractJSONFromMarkdown(response) {
+            do {
+                return try decoder(extractedData)
+            } catch {
+                logger.error("Failed to decode extracted JSON: \(error)")
+            }
+        }
+        
+        logger.error("Could not extract valid JSON from response")
+        throw AIServiceError.invalidResponseFormat
     }
 }
 
