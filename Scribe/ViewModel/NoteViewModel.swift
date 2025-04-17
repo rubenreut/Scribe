@@ -5,10 +5,23 @@ import OSLog
 import CloudKit
 
 /// Enumeration of iCloud sync states for UI display
-enum SyncStatus {
+enum SyncStatus: Equatable {
     case upToDate
     case syncing
     case error(String)
+    
+    static func == (lhs: SyncStatus, rhs: SyncStatus) -> Bool {
+        switch (lhs, rhs) {
+        case (.upToDate, .upToDate):
+            return true
+        case (.syncing, .syncing):
+            return true
+        case (.error(let lhsMessage), .error(let rhsMessage)):
+            return lhsMessage == rhsMessage
+        default:
+            return false
+        }
+    }
 }
 
 /// ViewModel for handling note operations
