@@ -13,6 +13,7 @@ struct NoteListView: View {
     @State private var isOrganizing = false
     @State private var errorMessage: String? = nil
     @State private var showError = false
+    @State private var animateList = false
     
     // Folder management states
     @State private var selectedFolder: ScribeFolder? = nil
@@ -30,14 +31,33 @@ struct NoteListView: View {
                         HStack {
                             Image(systemName: folder.icon)
                                 .foregroundColor(Color(folder.color))
-                            Text(folder.name)
+                                .font(.system(size: 16, weight: .medium))
+                                .frame(width: 28, height: 28)
+                                .background(Color(folder.color).opacity(0.1))
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                            
+                            VStack(alignment: .leading) {
+                                Text(folder.name)
+                                    .font(.headline)
+                                    .foregroundColor(.primary)
+                            }
+                            
                             Spacer()
+                            
                             Text("\(folder.notes?.count ?? 0)")
+                                .font(.subheadline)
                                 .foregroundColor(.secondary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.secondary.opacity(0.1))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
                         .contentShape(Rectangle())
+                        .padding(.vertical, 6)
                         .onTapGesture {
-                            showFolderNotes(folder)
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                showFolderNotes(folder)
+                            }
                         }
                         .contextMenu {
                             Button {
@@ -46,7 +66,12 @@ struct NoteListView: View {
                                 Label("Delete Folder", systemImage: "trash")
                             }
                         }
+                        .transition(.asymmetric(
+                            insertion: .scale(scale: 0.9).combined(with: .opacity),
+                            removal: .scale(scale: 0.9).combined(with: .opacity)
+                        ))
                     }
+                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: viewModel.folders.count)
                 }
             }
             
@@ -55,10 +80,15 @@ struct NoteListView: View {
                 ForEach(notes, id: \.self) { note in
                     NoteRowView(note: note, viewModel: viewModel)
                         .tag(note)
+                        .listRowInsets(EdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                         .contextMenu {
                             Button(role: .destructive) {
                                 if let index = notes.firstIndex(where: { $0 == note }) {
-                                    onDelete(IndexSet(integer: index))
+                                    withAnimation {
+                                        onDelete(IndexSet(integer: index))
+                                    }
                                 }
                             } label: {
                                 Label("Delete", systemImage: "trash")
@@ -66,7 +96,9 @@ struct NoteListView: View {
                             
                             if note.folder != nil {
                                 Button {
-                                    viewModel.removeNoteFromFolder(note)
+                                    withAnimation {
+                                        viewModel.removeNoteFromFolder(note)
+                                    }
                                 } label: {
                                     Label("Remove from Folder", systemImage: "folder.badge.minus")
                                 }
@@ -75,7 +107,9 @@ struct NoteListView: View {
                                 Menu("Add to Folder") {
                                     ForEach(viewModel.folders, id: \.self) { folder in
                                         Button {
-                                            viewModel.assignNote(note, toFolder: folder)
+                                            withAnimation {
+                                                viewModel.assignNote(note, toFolder: folder)
+                                            }
                                         } label: {
                                             Label(folder.name, systemImage: folder.icon)
                                         }
@@ -89,8 +123,17 @@ struct NoteListView: View {
                                 }
                             }
                         }
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .top).combined(with: .opacity),
+                            removal: .scale(scale: 0.9).combined(with: .opacity)
+                        ))
                 }
-                .onDelete(perform: onDelete)
+                .onDelete { indexSet in
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        onDelete(indexSet)
+                    }
+                }
+                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: notes.count)
             }
         }
         .listStyle(.sidebar)
@@ -102,10 +145,15 @@ struct NoteListView: View {
                 Menu {
                     Button {
                         Task {
-                            isOrganizing = true
+                            withAnimation {
+                                isOrganizing = true
+                            }
                             errorMessage = nil
                             let (success, error) = await viewModel.organizeNotesWithAI()
-                            isOrganizing = false
+                            
+                            withAnimation {
+                                isOrganizing = false
+                            }
                             
                             if !success, let errorMsg = error {
                                 errorMessage = errorMsg
@@ -129,19 +177,27 @@ struct NoteListView: View {
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .frame(width: 34, height: 34)
+                        .background(Color.secondary.opacity(0.1))
+                        .clipShape(Circle())
+                        .pressAnimation()
                 }
             }
-            
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()
+                .transition(.slideUp)
         }
         .sheet(isPresented: $showCreateFolder) {
             CreateFolderView(viewModel: viewModel)
+                .transition(.slideUp)
         }
         .overlay {
             if isOrganizing {
                 FormatProgressView(message: "Organizing notes...")
+                    .transition(.opacity)
             }
         }
         .alert("Organization Error", isPresented: $showError, presenting: errorMessage) { _ in
@@ -156,14 +212,18 @@ struct NoteListView: View {
             
             Button("Delete Only Folder", role: .destructive) {
                 if let folder = folderToDelete {
-                    viewModel.deleteFolder(folder, deleteNotes: false)
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        viewModel.deleteFolder(folder, deleteNotes: false)
+                    }
                     folderToDelete = nil
                 }
             }
             
             Button("Delete Folder and Notes", role: .destructive) {
                 if let folder = folderToDelete {
-                    viewModel.deleteFolder(folder, deleteNotes: true)
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        viewModel.deleteFolder(folder, deleteNotes: true)
+                    }
                     folderToDelete = nil
                 }
             }
@@ -175,6 +235,13 @@ struct NoteListView: View {
         }) {
             if let folder = selectedFolder {
                 FolderNotesView(folder: folder, viewModel: viewModel)
+                    .transition(.slideUp)
+            }
+        }
+        .onAppear {
+            // When view appears, animate the list items sequentially
+            withAnimation(.easeOut(duration: 0.4).delay(0.1)) {
+                animateList = true
             }
         }
     }
@@ -196,40 +263,6 @@ extension NoteListView {
     }
 }
 
-struct NoteRowView: View {
-    let note: ScribeNote
-    let viewModel: NoteViewModel
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(note.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .accessibilityAddTraits(.isHeader)
-                
-                if note.folder != nil {
-                    Spacer()
-                    Image(systemName: "folder")
-                        .foregroundColor(.secondary)
-                        .font(.caption)
-                }
-            }
-            
-            Text(note.lastModified, style: .relative)
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .accessibilityLabel("Last edited \(note.lastModified.formatted())")
-            
-            Text(viewModel.attributedContent(for: note).string)
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .lineLimit(2)
-                .accessibilityLabel("Note preview: \(viewModel.attributedContent(for: note).string)")
-        }
-        .padding(.vertical, 4)
-    }
-}
 
 #Preview {
     PreviewContainer { container in

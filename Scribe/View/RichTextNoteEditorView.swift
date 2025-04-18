@@ -53,26 +53,47 @@ struct RichTextNoteEditorView: View {
                     TextField("Title", text: Binding(
                         get: { note.title },
                         set: { newValue in
-                            viewModel.updateNoteTitle(note, newTitle: newValue)
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                viewModel.updateNoteTitle(note, newTitle: newValue)
+                            }
                         }
                     ))
-                    .font(.largeTitle)
+                    .font(.system(.largeTitle, design: .rounded))
                     .fontWeight(.bold)
                     .padding([.horizontal, .top])
+                    .padding(.top, 6)
                     .textFieldStyle(.plain)
                     .accessibilityIdentifier("note-title-field")
+                    .onChange(of: note.title) { oldValue, newValue in
+                        if oldValue.isEmpty && !newValue.isEmpty {
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
+                                // Title appearance animation
+                            }
+                        }
+                    }
                     
                     HStack {
-                        Text(note.lastModified, style: .date)
+                        Text("Created \(note.createdAt.formatted(date: .abbreviated, time: .shortened))")
                             .font(.caption)
                             .foregroundColor(.secondary)
+                            .padding(6)
+                            .background(Color.secondary.opacity(0.07))
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
                         Spacer()
                     }
                     .padding(.horizontal)
                     .padding(.bottom, 4)
+                    .padding(.top, 2)
                     
                     Divider()
                         .padding(.horizontal)
+                        .background(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.accentColor.opacity(0.1), Color.clear, Color.clear]),
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
                     
                     // Rich text editor
                     ZStack(alignment: .bottomTrailing) {

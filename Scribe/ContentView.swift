@@ -7,6 +7,8 @@ struct ContentView: View {
     private let logger = Logger(subsystem: Constants.App.bundleID, category: "ContentView")
     @Environment(\.modelContext) private var modelContext
     @State private var viewModel: NoteViewModel
+    @State private var showNewNoteAnimation = false
+    @State private var isSplitViewCompact = false
     
     init() {
         // Initialize with an empty container that will be replaced when Environment is available
@@ -42,7 +44,7 @@ struct ContentView: View {
     }
     
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: .constant(.automatic)) {
             VStack {
                 NoteListView(
                     notes: viewModel.filteredNotes,
@@ -54,40 +56,86 @@ struct ContentView: View {
                 .navigationTitle("Notes")
                 .toolbar {
                     ToolbarItem(placement: .navigationBarTrailing) {
-                        Button(action: viewModel.createNewNote) {
-                            Label("New Note", systemImage: "square.and.pencil")
-                                .accessibilityLabel("Create a new note")
+                        Button(action: {
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                                showNewNoteAnimation = true
+                                viewModel.createNewNote()
+                            }
+                            
+                            // Reset animation state after delay
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                                showNewNoteAnimation = false
+                            }
+                        }) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.accentColor)
+                                    .frame(width: 38, height: 38)
+                                    .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                                
+                                Image(systemName: "square.and.pencil")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .accessibilityLabel("Create a new note")
+                            }
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.white.opacity(0.2), lineWidth: 2)
+                                    .scaleEffect(showNewNoteAnimation ? 1.4 : 1.0)
+                                    .opacity(showNewNoteAnimation ? 0 : 1)
+                            )
+                            .pressAnimation()
                         }
                     }
                     
                     ToolbarItem(placement: .navigationBarLeading) {
                         CloudSyncStatusView(status: viewModel.syncStatus)
                     }
-                    
-                    // Rich text toggle button removed - always using rich text editor
                 }
                 
                 // Show iCloud status at the bottom of the list
                 if case .error(let message) = viewModel.syncStatus {
                     VStack {
-                        Text("iCloud Sync Error")
-                            .font(.caption)
-                            .foregroundColor(.red)
+                        HStack {
+                            Image(systemName: "exclamationmark.icloud")
+                                .foregroundColor(.red)
+                                .font(.caption)
+                            
+                            Text("iCloud Sync Error")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundColor(.red)
+                            
+                            Spacer()
+                        }
+                        
                         Text(message)
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }
-                    .padding(.horizontal)
-                    .padding(.bottom, 4)
+                    .padding(10)
                     .frame(maxWidth: .infinity)
-                    .background(Color(.systemBackground))
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.red.opacity(0.1))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.red.opacity(0.2), lineWidth: 1)
+                            )
+                    )
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
         } detail: {
             // Only show the rich text editor
             RichTextNoteEditorView(selectedNote: $viewModel.selectedNote, viewModel: viewModel)
+                .transition(.opacity)
+                .id(viewModel.selectedNote?.persistentModelID.storeIdentifier ?? "no-note") // Force view refresh when note changes
         }
         .navigationSplitViewStyle(.balanced)
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: viewModel.selectedNote?.persistentModelID.storeIdentifier)
         .onAppear {
             // Replace the temporary context with the real one
             viewModel = NoteViewModel(modelContext: modelContext)
@@ -96,7 +144,9 @@ struct ContentView: View {
             viewModel.refreshNotes()
         }
         .onReceive(NotificationCenter.default.publisher(for: AppNotification.createNewNote.name)) { _ in
-            viewModel.createNewNote()
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                viewModel.createNewNote()
+            }
         }
     }
 }

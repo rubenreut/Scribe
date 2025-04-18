@@ -57,7 +57,9 @@ extension RichTextNoteEditorView {
             // Format menu (typography)
             FormatMenu(formattingState: formattingState) { action in
                 if let note = selectedNote {
-                    handleFormatAction(action, for: note)
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        handleFormatAction(action, for: note)
+                    }
                 }
             }
             
@@ -72,19 +74,28 @@ extension RichTextNoteEditorView {
             
             // Share button
             ShareLink(item: selectedNote != nil ? noteContentForSharing() : "") {
-
                 Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 17, weight: .semibold))
-                    .frame(width: 34, height: 34)
-                    .background(Color.secondary.opacity(0.1))
-                    .clipShape(Circle())
+                    .toolbarButtonStyle()
             }
+            .buttonStyle(PressButtonStyle())
         }
         .padding(.horizontal)
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
         .background(
-            Color(UIColor.secondarySystemBackground)
-                .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: -1)
+            ZStack {
+                Color(UIColor.secondarySystemBackground)
+                    .shadow(color: .black.opacity(0.05), radius: 3, x: 0, y: -1)
+                
+                // Add subtle gradient overlay for depth
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color.white.opacity(0.05),
+                        Color.white.opacity(0.0)
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
         )
     }
     
